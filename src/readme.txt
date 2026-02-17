@@ -8,3 +8,6 @@ python main.py
 
 ##Step 3
 python -m pytest tests/ -v
+
+##Run the dashboard
+python -m streamlit run dashboard/app.py — view the dashboard
