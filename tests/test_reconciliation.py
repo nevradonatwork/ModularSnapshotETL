@@ -67,8 +67,12 @@ class TestReconcileAvgPrice:
         db_conn.execute(
             """UPDATE fct_neighbourhood_monthly_avg_price
                SET avg_price = avg_price + 999
-               WHERE room_type = 'ALL'
-               LIMIT 1"""
+               WHERE rowid = (
+                   SELECT rowid
+                   FROM fct_neighbourhood_monthly_avg_price
+                   WHERE room_type = 'ALL'
+                   LIMIT 1
+               )"""
         )
         db_conn.commit()
 
