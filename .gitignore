@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+dataset/*/
+dataset/*.csv.gz
+dataset/*.csv
+output/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+*.db
+*.db-wal
+*.db-shm

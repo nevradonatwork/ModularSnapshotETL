@@ -1,5 +1,3 @@
-# ModularSnapshotETL
-Modular snapshot-based ELT data platform with layered architecture, idempotent processing, and built-in data quality controls.
 # BreezeBnb Data Platform
 
 A layered data engineering platform that transforms raw Airbnb-style listing data into a SQLite analytical warehouse with dimensional modelling, data quality controls, and BI-ready reporting views.
@@ -357,4 +355,3 @@ The included `crontab` file configures the pipeline to run on the 2nd of each mo
 ## Assumptions
 
 See [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) for production deployment strategy and full list of assumptions.
-
