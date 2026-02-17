@@ -1,4 +1,4 @@
-# BreezeBnb Data Platform
+# ModularSnapshotETL Data Platform
 
 A layered data engineering platform that transforms raw Airbnb-style listing data into a SQLite analytical warehouse with dimensional modelling, data quality controls, and BI-ready reporting views.
 
@@ -21,7 +21,7 @@ Then run:
 python main.py
 ```
 
-The pipeline auto-discovers all city subdirectories, processes them through six data layers, and writes everything into `BreezeBnb.db`.
+The pipeline auto-discovers all city subdirectories, processes them through six data layers, and writes everything into `ModularSnapshotETL.db`.
 
 ## Business Outputs
 
@@ -282,7 +282,7 @@ The test suite executes real ETL code paths against an isolated SQLite test data
 - **Isolated database per test:** `tests/conftest.py` creates a fresh in-memory SQLite connection (`:memory:`) and applies the full schema via `create_all(conn)`.
 - **Realistic source input:** fixtures generate temporary `listings.csv` / `listings.csv.gz` files from representative sample rows.
 - **Actual inserts and SQL assertions:** tests run `load_raw`, `load_staging`, and `pipeline.run`, then query tables with SQL to verify row counts, flags, and history behavior.
-- **No production side effects:** tests do not write to production `BreezeBnb.db`; in-memory DB state disappears when each test ends.
+- **No production side effects:** tests do not write to production `ModularSnapshotETL.db`; in-memory DB state disappears when each test ends.
 
 ### Outcome Visibility
 
@@ -291,8 +291,8 @@ When running with `-v`, each test line shows `PASSED` / `FAILED`; the final line
 ## Project Structure
 
 ```
-BreezeBnb/
-├── main.py                # Entry point — creates BreezeBnb.db, discovers cities, runs pipeline
+ModularSnapshotETL/
+├── main.py                # Entry point — creates ModularSnapshotETL.db, discovers cities, runs pipeline
 ├── crontab                # Schedule definition for the orchestrator
 ├── requirements.txt       # Python dependencies
 ├── src/
@@ -314,7 +314,7 @@ BreezeBnb/
 │   ├── test_pipeline.py   # End-to-end pipeline tests
 │   └── test_main.py       # City discovery tests
 ├── dataset/               # Input: dataset/<city>/listings.csv.gz (not committed)
-└── BreezeBnb.db           # Output: SQLite database (not committed)
+└── ModularSnapshotETL.db  # Output: SQLite database (not committed)
 ```
 
 ## Email Notifications
@@ -326,16 +326,16 @@ The pipeline sends an email notification after every run with a summary of the e
 Set the following environment variables before running the pipeline:
 
 ```bash
-export BREEZEBNB_SMTP_HOST="smtp.gmail.com"       # SMTP server (default: smtp.gmail.com)
-export BREEZEBNB_SMTP_PORT="587"                   # SMTP port (default: 587)
-export BREEZEBNB_SMTP_USER="your-sender@gmail.com" # Sender email / SMTP username
-export BREEZEBNB_SMTP_PASSWORD="your-app-password"  # SMTP password or Gmail app password
-export BREEZEBNB_NOTIFY_EMAIL="nevradonatwork@gmail.com"  # Recipient email address
+export MODULARSNAPSHOTETL_SMTP_HOST="smtp.gmail.com"       # SMTP server (default: smtp.gmail.com)
+export MODULARSNAPSHOTETL_SMTP_PORT="587"                   # SMTP port (default: 587)
+export MODULARSNAPSHOTETL_SMTP_USER="your-sender@gmail.com" # Sender email / SMTP username
+export MODULARSNAPSHOTETL_SMTP_PASSWORD="your-app-password"  # SMTP password or Gmail app password
+export MODULARSNAPSHOTETL_NOTIFY_EMAIL="nevradonatwork@gmail.com"  # Recipient email address
 ```
 
-**Gmail users:** Generate an [App Password](https://myaccount.google.com/apppasswords) (requires 2-Step Verification) and use it as `BREEZEBNB_SMTP_PASSWORD`.
+**Gmail users:** Generate an [App Password](https://myaccount.google.com/apppasswords) (requires 2-Step Verification) and use it as `MODULARSNAPSHOTETL_SMTP_PASSWORD`.
 
-If `BREEZEBNB_SMTP_USER` or `BREEZEBNB_SMTP_PASSWORD` are not set, the email notification is silently skipped and the pipeline continues normally.
+If `MODULARSNAPSHOTETL_SMTP_USER` or `MODULARSNAPSHOTETL_SMTP_PASSWORD` are not set, the email notification is silently skipped and the pipeline continues normally.
 
 ### Email Content
 

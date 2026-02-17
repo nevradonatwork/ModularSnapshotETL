@@ -1,4 +1,4 @@
-# BreezeBnb Data Pipeline Schedule
+# ModularSnapshotETL Data Pipeline Schedule
 # Runs on the 2nd of each month at 6:00 AM UTC
 # (Allows time for end-users to upload the monthly dataset on the 1st)
 #
@@ -12,6 +12,6 @@
 #              day of month   1-31
 #              month          1-12 (or names, see below)
 #              day of week    0-7 (0 or 7 is Sunday, or use names)
-# To install: crontab /home/user/BreezeBnb/crontab
+# To install: crontab /home/user/ModularSnapshotETL/crontab
 # To verify:  crontab -l
-0 6 2 * * cd /home/user/BreezeBnb && python main.py >> /var/log/breezebnb_pipeline.log 2>&1
+0 6 2 * * cd /home/user/ModularSnapshotETL && python main.py >> /var/log/modularsnapshotetl_pipeline.log 2>&1

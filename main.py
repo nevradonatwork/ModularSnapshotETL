@@ -1,5 +1,5 @@
 """
-Entry point for the BreezeBnb data pipeline.
+Entry point for the ModularSnapshotETL data pipeline.
 
 Usage:
     python main.py
@@ -8,7 +8,7 @@ Place each city's listings.csv.gz in a subdirectory under dataset/:
     dataset/new-york/listings.csv.gz
     dataset/chicago/listings.csv.gz
 
-The pipeline creates a SQLite database (BreezeBnb.db) with layered
+The pipeline creates a SQLite database (ModularSnapshotETL.db) with layered
 tables: raw, staging, dimensions, facts, and reporting views.
 """
 import logging
@@ -38,7 +38,7 @@ _load_dotenv()
 
 DATASET_DIR = "dataset"
 LISTING_FILENAME = "listings.csv.gz"
-DATABASE_PATH = "BreezeBnb.db"
+DATABASE_PATH = "ModularSnapshotETL.db"
 
 
 def discover_cities(dataset_dir):
