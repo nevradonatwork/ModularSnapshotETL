@@ -42,6 +42,34 @@ month = filters["month"]
 room_type = filters["room_type"]
 neighbourhoods = filters["neighbourhoods"]
 
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+def _fmt_price(val) -> str:
+    """Format a numeric price as $1,101.00."""
+    try:
+        return f"${float(val):,.2f}"
+    except (ValueError, TypeError):
+        return str(val)
+
+
+def _prepare_top10_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Add listing_url, format prices, cast listing_id to str, select columns."""
+    if df.empty:
+        return df
+    out = df.copy()
+    # Preserve listing_id precision — cast to string
+    out["listing_id"] = out["listing_id"].astype(object).astype(str)
+    # Construct listing URL from id
+    out["listing_url"] = "https://www.airbnb.com/rooms/" + out["listing_id"]
+    # Format dollar columns
+    for col in ("price_amount", "neighbourhood_avg_price", "price_delta"):
+        if col in out.columns:
+            out[col] = out[col].apply(_fmt_price)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Helper to build neighbourhood WHERE clause
 # ---------------------------------------------------------------------------
@@ -51,6 +79,27 @@ def _neighbourhood_clause(col: str = "neighbourhood") -> str:
     placeholders = ", ".join(f"'{n}'" for n in neighbourhoods)
     return f" AND {col} IN ({placeholders})"
 
+
+# Column config for the top-10 tables
+TOP10_DISPLAY_COLUMNS = [
+    "listing_url",
+    "room_type",
+    "neighbourhood",
+    "price_amount",
+    "neighbourhood_avg_price",
+    "price_delta",
+    "rank_in_neighbourhood",
+]
+
+TOP10_COLUMN_CONFIG = {
+    "listing_url": st.column_config.LinkColumn("Listing URL", display_text="Open"),
+    "room_type": "Room Type",
+    "neighbourhood": "Neighbourhood",
+    "price_amount": "Price",
+    "neighbourhood_avg_price": "Neighbourhood Avg",
+    "price_delta": "Price Delta",
+    "rank_in_neighbourhood": "Rank",
+}
 
 # ---------------------------------------------------------------------------
 # Tabs
@@ -91,7 +140,11 @@ with tab1:
         fig = neighbourhood_avg_price_bar(avg_df)
         if fig:
             st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(avg_df, use_container_width=True, hide_index=True)
+
+        # Format avg_price for display
+        display_avg = avg_df.copy()
+        display_avg["avg_price"] = display_avg["avg_price"].apply(_fmt_price)
+        st.dataframe(display_avg, use_container_width=True, hide_index=True)
 
 # ===== TAB 2: Top 10 Overpriced ==========================================
 with tab2:
@@ -125,27 +178,14 @@ with tab2:
         fig = top10_price_comparison_bar(over_df, "OVERPRICED")
         if fig:
             st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(over_df, use_container_width=True, hide_index=True)
 
-        # Listing detail
-        listing_ids = over_df["listing_id"].tolist()
-        selected_id = st.selectbox("Select a listing for details", listing_ids, key="over_detail")
-        if selected_id:
-            row = over_df[over_df["listing_id"] == selected_id].iloc[0]
-            with st.expander(f"Listing {selected_id} — Details", expanded=True):
-                c1, c2 = st.columns(2)
-                c1.markdown(f"**Price:** ${row['price_amount']:,.2f}")
-                c1.markdown(f"**Neighbourhood Avg:** ${row['neighbourhood_avg_price']:,.2f}")
-                c1.markdown(f"**Delta:** ${row['price_delta']:,.2f} ({row['price_delta_pct']:.1f}%)")
-                c2.markdown(f"**Neighbourhood:** {row['neighbourhood']}")
-                c2.markdown(f"**Room Type:** {row['room_type']}")
-                c2.markdown(f"**Compared Against:** {row['compared_against_room_type']}")
-                st.caption(
-                    f"This listing is priced at ${row['price_amount']:,.2f} vs "
-                    f"neighbourhood avg ${row['neighbourhood_avg_price']:,.2f} for "
-                    f"{row['compared_against_room_type']}, which is "
-                    f"{row['price_delta_pct']:.1f}% above average."
-                )
+        display_over = _prepare_top10_df(over_df)
+        st.dataframe(
+            display_over[TOP10_DISPLAY_COLUMNS],
+            column_config=TOP10_COLUMN_CONFIG,
+            use_container_width=True,
+            hide_index=True,
+        )
 
 # ===== TAB 3: Top 10 Underpriced =========================================
 with tab3:
@@ -174,26 +214,14 @@ with tab3:
         fig = top10_price_comparison_bar(under_df, "UNDERPRICED")
         if fig:
             st.plotly_chart(fig, use_container_width=True)
-        st.dataframe(under_df, use_container_width=True, hide_index=True)
 
-        listing_ids_u = under_df["listing_id"].tolist()
-        selected_id_u = st.selectbox("Select a listing for details", listing_ids_u, key="under_detail")
-        if selected_id_u:
-            row = under_df[under_df["listing_id"] == selected_id_u].iloc[0]
-            with st.expander(f"Listing {selected_id_u} — Details", expanded=True):
-                c1, c2 = st.columns(2)
-                c1.markdown(f"**Price:** ${row['price_amount']:,.2f}")
-                c1.markdown(f"**Neighbourhood Avg:** ${row['neighbourhood_avg_price']:,.2f}")
-                c1.markdown(f"**Delta:** ${row['price_delta']:,.2f} ({row['price_delta_pct']:.1f}%)")
-                c2.markdown(f"**Neighbourhood:** {row['neighbourhood']}")
-                c2.markdown(f"**Room Type:** {row['room_type']}")
-                c2.markdown(f"**Compared Against:** {row['compared_against_room_type']}")
-                st.caption(
-                    f"This listing is priced at ${row['price_amount']:,.2f} vs "
-                    f"neighbourhood avg ${row['neighbourhood_avg_price']:,.2f} for "
-                    f"{row['compared_against_room_type']}, which is "
-                    f"{abs(row['price_delta_pct']):.1f}% below average."
-                )
+        display_under = _prepare_top10_df(under_df)
+        st.dataframe(
+            display_under[TOP10_DISPLAY_COLUMNS],
+            column_config=TOP10_COLUMN_CONFIG,
+            use_container_width=True,
+            hide_index=True,
+        )
 
 # ===== TAB 4: Data Compliance =============================================
 with tab4:
