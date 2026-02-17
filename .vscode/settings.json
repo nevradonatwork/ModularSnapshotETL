@@ -1,0 +1,8 @@
+{
+    "python.analysis.typeCheckingMode": "strict",
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportMissingTypeStubs": "warning",
+        "reportUnusedVariable": "warning",
+        "reportOptionalMemberAccess": "error"
+    }
+}
