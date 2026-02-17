@@ -6,13 +6,13 @@ In production, the pipeline runs as a scheduled job on a cloud platform (e.g., A
 The orchestrator reads the `crontab` file and triggers the pipeline on the 2nd of each month,
 giving end-users a one-day window to upload the monthly `listings.csv.gz`.
 
-**Database:** The pipeline writes all data into a SQLite database (`BreezeBnb.db`) with five
+**Database:** The pipeline writes all data into a SQLite database (`ModularSnapshotETL.db`) with five
 logical layers: raw, staging, dimensions, facts, and presentation views. For production at
 scale, the SQLite database can be replaced with a cloud data warehouse (BigQuery, Snowflake,
 or Redshift) — the layered architecture and SQL schema translate directly.
 
 **Storage:** Input datasets move from a local `dataset/` directory to cloud object storage
-(e.g., S3 or GCS), partitioned by city and month (`s3://breezebnb/raw/{city}/listings.csv.gz`).
+(e.g., S3 or GCS), partitioned by city and month (`s3://modularsnapshotetl/raw/{city}/listings.csv.gz`).
 The raw layer (`raw_listings`) provides an immutable audit trail within the database, enabling
 replay and reprocessing without re-downloading source files.
 
@@ -236,7 +236,7 @@ logic or data model.
     notification that fresh insights are available remains an external concern.
 19. The cron schedule uses UTC (6:00 AM). This is assumed acceptable for all teams regardless
     of city timezone.
-20. The SQLite database file (`BreezeBnb.db`) is excluded from version control. In production,
+20. The SQLite database file (`ModularSnapshotETL.db`) is excluded from version control. In production,
     this would be replaced by a persistent cloud database.
 21. Processed source files are archived after successful raw ingestion. The archive directory
     (`dataset/<city>/archive/`) preserves the exact file that was processed for audit compliance

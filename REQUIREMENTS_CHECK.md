@@ -1,4 +1,4 @@
-# BreezeBnb Requirement Check
+# ModularSnapshotETL Requirement Check
 
 ## Scope checked
 - Prompt requirements in the coding exercise document.
