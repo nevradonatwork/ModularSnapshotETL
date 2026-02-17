@@ -1,5 +1,5 @@
 """
-Core pipeline orchestration for the BreezeBnb data platform.
+Core pipeline orchestration for the ModularSnapshotETL data platform.
 
 Execution flow:
     1. Validate file existence

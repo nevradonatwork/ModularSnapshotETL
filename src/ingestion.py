@@ -1,5 +1,5 @@
 """
-Data ingestion for the BreezeBnb pipeline.
+Data ingestion for the ModularSnapshotETL pipeline.
 
 Handles loading source CSV files into the raw layer and transforming
 them into the staging layer with cleansing and deduplication.

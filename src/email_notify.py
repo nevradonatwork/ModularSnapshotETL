@@ -1,15 +1,15 @@
 """
-Email notification for BreezeBnb pipeline runs.
+Email notification for ModularSnapshotETL pipeline runs.
 
 Sends a summary email after each pipeline execution with run status,
 row counts, and error details from the ETL log tables.
 
 Configuration via environment variables:
-    BREEZEBNB_SMTP_HOST     — SMTP server hostname (default: smtp.gmail.com)
-    BREEZEBNB_SMTP_PORT     — SMTP server port (default: 587)
-    BREEZEBNB_SMTP_USER     — SMTP username / sender email (required)
-    BREEZEBNB_SMTP_PASSWORD — SMTP password or app password (required)
-    BREEZEBNB_NOTIFY_EMAIL  — Recipient email address (required)
+    ModularSnapshotETL_SMTP_HOST     — SMTP server hostname (default: smtp.gmail.com)
+    ModularSnapshotETL_SMTP_PORT     — SMTP server port (default: 587)
+    ModularSnapshotETL_SMTP_USER     — SMTP username / sender email (required)
+    ModularSnapshotETL_SMTP_PASSWORD — SMTP password or app password (required)
+    ModularSnapshotETL_NOTIFY_EMAIL  — Recipient email address (required)
 """
 import json
 import logging
@@ -25,11 +25,11 @@ logger = logging.getLogger(__name__)
 def _get_smtp_config() -> dict:
     """Read SMTP configuration from environment variables at call time."""
     return {
-        "host": os.environ.get("BREEZEBNB_SMTP_HOST", "smtp.gmail.com"),
-        "port": int(os.environ.get("BREEZEBNB_SMTP_PORT", "587")),
-        "user": os.environ.get("BREEZEBNB_SMTP_USER", ""),
-        "password": os.environ.get("BREEZEBNB_SMTP_PASSWORD", ""),
-        "notify_email": os.environ.get("BREEZEBNB_NOTIFY_EMAIL", "nevradonatwork@gmail.com"),
+        "host": os.environ.get("ModularSnapshotETL_SMTP_HOST", "smtp.gmail.com"),
+        "port": int(os.environ.get("ModularSnapshotETL_SMTP_PORT", "587")),
+        "user": os.environ.get("ModularSnapshotETL_SMTP_USER", ""),
+        "password": os.environ.get("ModularSnapshotETL_SMTP_PASSWORD", ""),
+        "notify_email": os.environ.get("ModularSnapshotETL_NOTIFY_EMAIL", "nevradonatwork@gmail.com"),
     }
 
 
@@ -149,7 +149,7 @@ def _build_email_body(
 ) -> str:
     """Build a plain-text email body from run data."""
     lines = [
-        "BreezeBnb Pipeline Run Report",
+        "ModularSnapshotETL Pipeline Run Report",
         "=" * 40,
         "",
         f"Timestamp   : {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
@@ -193,7 +193,7 @@ def _build_email_body(
         lines.append("")
 
     lines.append("--")
-    lines.append("BreezeBnb Data Platform — Automated Notification")
+    lines.append("ModularSnapshotETL Data Platform — Automated Notification")
     return "\n".join(lines)
 
 
@@ -254,13 +254,13 @@ def send_run_notification(
 
     if not config["user"] or not config["password"]:
         logger.warning(
-            "Email notification skipped: BREEZEBNB_SMTP_USER and "
-            "BREEZEBNB_SMTP_PASSWORD environment variables are not set."
+            "Email notification skipped: ModularSnapshotETL_SMTP_USER and "
+            "ModularSnapshotETL_SMTP_PASSWORD environment variables are not set."
         )
         return False
 
     if not config["notify_email"]:
-        logger.warning("Email notification skipped: BREEZEBNB_NOTIFY_EMAIL is not set.")
+        logger.warning("Email notification skipped: ModularSnapshotETL_NOTIFY_EMAIL is not set.")
         return False
 
     run_info = _get_latest_run(conn)
@@ -273,7 +273,7 @@ def send_run_notification(
     body = _build_email_body(run_info, errors, cities, failed, rec_summary)
 
     status = run_info["status"]
-    subject = f"BreezeBnb Pipeline Run #{run_info['run_id']} — {status}"
+    subject = f"ModularSnapshotETL Pipeline Run #{run_info['run_id']} — {status}"
 
     msg = MIMEText(body)
     msg["Subject"] = subject

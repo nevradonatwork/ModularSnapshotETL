@@ -1,5 +1,5 @@
 """
-ETL logging and error handling for the BreezeBnb pipeline.
+ETL logging and error handling for the ModularSnapshotETL pipeline.
 
 Provides structured logging to etl_run_log and etl_error_log tables,
 plus Python logging integration.

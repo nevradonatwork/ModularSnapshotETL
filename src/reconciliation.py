@@ -1,5 +1,5 @@
 """
-Reconciliation layer for the BreezeBnb data platform.
+Reconciliation layer for the ModularSnapshotETL data platform.
 
 Compares independently-calculated results from staging data against
 the fact tables and reporting views to ensure data integrity.

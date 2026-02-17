@@ -1,5 +1,5 @@
 """
-Database schema for the BreezeBnb data platform.
+Database schema for the ModularSnapshotETL data platform.
 
 Layers:
     raw_     – immutable landing storage
@@ -14,7 +14,7 @@ import sqlite3
 
 
 def create_all(conn: sqlite3.Connection) -> None:
-    """Create every table, index, and view in the BreezeBnb database."""
+    """Create every table, index, and view in the ModularSnapshotETL database."""
     cur = conn.cursor()
     _create_etl_tables(cur)
     _create_raw_tables(cur)

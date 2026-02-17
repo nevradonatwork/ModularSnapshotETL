@@ -1,5 +1,5 @@
 """
-Fact table loaders for the BreezeBnb data platform.
+Fact table loaders for the ModularSnapshotETL data platform.
 
 Loads the base fact (fct_listing_monthly_snapshot) and the aggregated
 facts (fct_neighbourhood_monthly_avg_price, fct_neighbourhood_monthly_top10_price_delta).

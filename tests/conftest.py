@@ -1,4 +1,4 @@
-"""Shared test fixtures for BreezeBnb tests."""
+"""Shared test fixtures for ModularSnapshotETL tests."""
 import sqlite3
 
 import pandas as pd

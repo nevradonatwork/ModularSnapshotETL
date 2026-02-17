@@ -1,5 +1,5 @@
 """
-Data quality and validation controls for the BreezeBnb pipeline.
+Data quality and validation controls for the ModularSnapshotETL pipeline.
 
 Implements column validation, type checks, and business rule enforcement
 as described in the design document section 5.

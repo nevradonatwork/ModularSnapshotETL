@@ -1,5 +1,5 @@
 """
-Dimension table loaders for the BreezeBnb data platform.
+Dimension table loaders for the ModularSnapshotETL data platform.
 
 Handles upsert logic for dim_date, dim_city, dim_neighbourhood,
 dim_host (SCD2), and dim_listing (SCD2).
