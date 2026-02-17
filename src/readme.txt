@@ -10,4 +10,4 @@ python main.py
 python -m pytest tests/ -v
 
 ##Run the dashboard
-python -m streamlit run dashboard/app.py — view the dashboard
+python -m streamlit run app.py — view the dashboard

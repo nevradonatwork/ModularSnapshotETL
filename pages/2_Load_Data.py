@@ -20,7 +20,8 @@ from src.validation import REQUIRED_COLUMNS
 
 st.title("Load Data")
 st.markdown(
-    "Ingest an Inside Airbnb `listings.csv.gz` file and run the full ETL pipeline."
+    "Ingest an Inside Airbnb `listings.csv.gz` file from Inside Airbnb, using the dataset available at" \
+    " https://insideairbnb.com/get-the-data/ and execute the complete end-to-end ETL pipeline."
 )
 
 # ---------------------------------------------------------------------------
