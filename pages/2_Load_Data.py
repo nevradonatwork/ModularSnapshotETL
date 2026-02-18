@@ -3,7 +3,6 @@
 import json
 import os
 import sys
-import tempfile
 import urllib.request
 
 import pandas as pd
@@ -17,6 +16,7 @@ if _project_root not in sys.path:
 from dashboard.constants import DATASET_DIR, LISTING_FILENAME, INSIDE_AIRBNB_CITIES, DB_PATH
 from dashboard.pipeline_runner import run_with_progress
 from src.validation import REQUIRED_COLUMNS
+from src.data_fetcher import discover_snapshots, get_latest_per_city, fetch_city_data
 
 st.title("Load Data")
 st.markdown(
@@ -28,23 +28,72 @@ st.markdown(
 # ---------------------------------------------------------------------------
 st.header("1. Select City & Data Source")
 
-city_name = st.text_input(
-    "City name (required)",
-    placeholder="new-york",
-    help="Use lowercase slug format: new-york, chicago, los-angeles, san-francisco, new-orleans",
-)
-
 source_method = st.radio(
     "Data source",
-    ["Upload file", "Paste URL", "Pick from Inside Airbnb list"],
+    [
+        "Auto-fetch from Inside Airbnb",
+        "Upload file",
+        "Paste URL",
+    ],
     horizontal=True,
 )
 
+city_name = ""
 uploaded_file = None
 paste_url = ""
-selected_airbnb_city = None
+auto_fetch_snapshot = None
 
-if source_method == "Upload file":
+if source_method == "Auto-fetch from Inside Airbnb":
+    st.markdown(
+        "Automatically discovers available cities from "
+        "[insideairbnb.com/get-the-data](https://insideairbnb.com/get-the-data/) "
+        "and downloads **listings.csv.gz**, **neighbourhoods.csv**, and "
+        "**neighbourhoods.geojson** into the correct folder."
+    )
+
+    # Discover available cities (cached per session)
+    if "airbnb_snapshots" not in st.session_state:
+        st.session_state.airbnb_snapshots = None
+
+    if st.button("Discover available cities"):
+        with st.spinner("Scanning insideairbnb.com ..."):
+            try:
+                snapshots = discover_snapshots()
+                latest = get_latest_per_city(snapshots)
+                st.session_state.airbnb_snapshots = latest
+                st.success(f"Found {len(latest)} cities.")
+            except Exception as e:
+                st.error(f"Could not reach Inside Airbnb: {e}")
+                st.caption(
+                    "The page may require JavaScript. As a fallback, use "
+                    "'Paste URL' and copy the direct link from the website."
+                )
+
+    latest = st.session_state.airbnb_snapshots
+    if latest:
+        city_options = sorted(latest.keys())
+        selected_city = st.selectbox(
+            "Select city",
+            city_options,
+            format_func=lambda s: f"{s}  ({latest[s].snapshot_date})",
+        )
+        if selected_city:
+            city_name = selected_city
+            auto_fetch_snapshot = latest[selected_city]
+            st.info(
+                f"**{selected_city}** — snapshot {auto_fetch_snapshot.snapshot_date}\n\n"
+                f"Files to download:\n"
+                f"- `listings.csv.gz`\n"
+                f"- `neighbourhoods.csv`\n"
+                f"- `neighbourhoods.geojson`"
+            )
+
+elif source_method == "Upload file":
+    city_name = st.text_input(
+        "City name (required)",
+        placeholder="new-york",
+        help="Use lowercase slug format: new-york, chicago, los-angeles",
+    )
     uploaded_file = st.file_uploader(
         "Upload listings.csv.gz",
         type=["gz"],
@@ -52,27 +101,14 @@ if source_method == "Upload file":
     )
 
 elif source_method == "Paste URL":
+    city_name = st.text_input(
+        "City name (required)",
+        placeholder="new-york",
+        help="Use lowercase slug format: new-york, chicago, los-angeles",
+    )
     paste_url = st.text_input(
         "URL to listings.csv.gz",
         placeholder="https://data.insideairbnb.com/.../listings.csv.gz",
-    )
-
-elif source_method == "Pick from Inside Airbnb list":
-    st.markdown(
-        "Browse the full catalogue at "
-        "[insideairbnb.com/get-the-data](https://insideairbnb.com/get-the-data/) "
-        "and paste the direct URL to a `listings.csv.gz` file below."
-    )
-    labels = [c["label"] for c in INSIDE_AIRBNB_CITIES]
-    selected_label = st.selectbox("City", ["-- select --"] + labels)
-    if selected_label != "-- select --":
-        match = next(c for c in INSIDE_AIRBNB_CITIES if c["label"] == selected_label)
-        city_name = city_name or match["city"]
-        st.info(f"City slug: **{match['city']}**")
-    paste_url = st.text_input(
-        "Direct URL to listings.csv.gz for the selected city",
-        placeholder="https://data.insideairbnb.com/.../listings.csv.gz",
-        help="Copy the direct link from insideairbnb.com/get-the-data/",
     )
 
 st.divider()
@@ -82,7 +118,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.header("2. Run Pipeline")
 
-run_disabled = not city_name.strip()
+run_disabled = not city_name.strip() if isinstance(city_name, str) else True
 if st.button("Ingest & Run Pipeline", disabled=run_disabled, type="primary"):
     city_slug = city_name.strip().lower()
     city_dir = os.path.join(DATASET_DIR, city_slug)
@@ -91,7 +127,30 @@ if st.button("Ingest & Run Pipeline", disabled=run_disabled, type="primary"):
 
     # --- Save / download the file ---
     try:
-        if source_method == "Upload file":
+        if source_method == "Auto-fetch from Inside Airbnb":
+            if auto_fetch_snapshot is None:
+                st.error("Please discover cities and select one first.")
+                st.stop()
+            with st.status("Downloading all files...", expanded=True) as status:
+                st.write(f"Downloading listings.csv.gz ...")
+                st.write(f"Downloading neighbourhoods.csv ...")
+                st.write(f"Downloading neighbourhoods.geojson ...")
+                downloaded = fetch_city_data(
+                    city_slug,
+                    snapshot=auto_fetch_snapshot,
+                    dest_dir=DATASET_DIR,
+                )
+                status.update(label=f"Downloaded {len(downloaded)} files", state="complete")
+            for ftype, fpath in downloaded.items():
+                st.success(f"`{ftype}` -> `{fpath}`")
+            # Point pipeline at the listings file
+            if "listings" in downloaded:
+                target_path = downloaded["listings"]
+            else:
+                st.error("listings.csv.gz was not downloaded.")
+                st.stop()
+
+        elif source_method == "Upload file":
             if uploaded_file is None:
                 st.error("Please upload a file first.")
                 st.stop()
@@ -99,7 +158,7 @@ if st.button("Ingest & Run Pipeline", disabled=run_disabled, type="primary"):
                 f.write(uploaded_file.getbuffer())
             st.success(f"File saved to `{target_path}`")
 
-        elif source_method in ("Paste URL", "Pick from Inside Airbnb list"):
+        elif source_method == "Paste URL":
             url = paste_url.strip()
             if not url:
                 st.error("Please provide a URL.")

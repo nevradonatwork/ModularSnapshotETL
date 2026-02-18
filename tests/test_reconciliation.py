@@ -63,12 +63,18 @@ class TestReconcileAvgPrice:
     def test_detects_mismatch_when_fct_tampered(self, db_conn, sample_csv):
         month_key, city_key = _load_full_pipeline(db_conn, sample_csv)
 
-        # Tamper with a fact table avg_price
+        # Tamper with a fact table avg_price (use subquery for cross-platform
+        # SQLite compat — UPDATE...LIMIT requires SQLITE_ENABLE_UPDATE_DELETE_LIMIT)
+        row_id = db_conn.execute(
+            """SELECT id FROM fct_neighbourhood_monthly_avg_price
+               WHERE room_type = 'ALL'
+               ORDER BY id LIMIT 1"""
+        ).fetchone()[0]
         db_conn.execute(
             """UPDATE fct_neighbourhood_monthly_avg_price
                SET avg_price = avg_price + 999
-               WHERE room_type = 'ALL'
-               LIMIT 1"""
+               WHERE id = ?""",
+            (row_id,),
         )
         db_conn.commit()
 
