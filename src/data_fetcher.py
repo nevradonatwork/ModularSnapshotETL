@@ -20,16 +20,17 @@ Usage (library):
     files = fetch_city_data("new-york", dest_dir="dataset")
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 import os
 import re
-import sys
 import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from html.parser import HTMLParser
 
 logger = logging.getLogger(__name__)

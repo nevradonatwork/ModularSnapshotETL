@@ -1,5 +1,7 @@
 """Page 2 — Data Load + Run History."""
 
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -8,14 +10,13 @@ import pandas as pd
 import streamlit as st
 
 # Ensure project root is importable
-_project_root = os.path.dirname(os.path.dirname(__file__))
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from dashboard.constants import DATASET_DIR, LISTING_FILENAME, DB_PATH, get_city_options
+from dashboard.constants import DATASET_DIR, LISTING_FILENAME, DB_PATH, CITY_OPTIONS
 from dashboard.pipeline_runner import run_with_progress
 from src.validation import REQUIRED_COLUMNS
-from src.data_fetcher import fetch_city_data, probe_catalog_city
 
 # ---------------------------------------------------------------------------
 # Page Header — Data Source Explanation
@@ -44,9 +45,8 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.header("Select City")
 
-city_options = get_city_options()
-city_labels = [c["label"] for c in city_options]
-slug_by_label = {c["label"]: c["slug"] for c in city_options}
+city_labels = [label for _slug, label in CITY_OPTIONS]
+slug_by_label = {label: slug for slug, label in CITY_OPTIONS}
 
 selected_label = st.selectbox(
     "Search and select a city",
@@ -69,6 +69,9 @@ st.header("Run Pipeline")
 
 run_disabled = not city_slug
 if st.button("Ingest & Run Pipeline", disabled=run_disabled, type="primary"):
+    # Defer heavy imports to button-click time
+    from src.data_fetcher import fetch_city_data, probe_catalog_city
+
     city_dir = os.path.join(DATASET_DIR, city_slug)
     os.makedirs(city_dir, exist_ok=True)
     target_path = os.path.join(city_dir, LISTING_FILENAME)
