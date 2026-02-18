@@ -8,15 +8,15 @@ LISTING_FILENAME = "listings.csv.gz"
 
 ROOM_TYPES = ["ALL", "Entire home/apt", "Private room", "Shared room", "Hotel room"]
 
-INSIDE_AIRBNB_CITIES = [
-    {"city": "new-york", "label": "New York, United States"},
-    {"city": "chicago", "label": "Chicago, United States"},
-    {"city": "los-angeles", "label": "Los Angeles, United States"},
-    {"city": "san-francisco", "label": "San Francisco, United States"},
-    {"city": "new-orleans", "label": "New Orleans, United States"},
-    {"city": "london", "label": "London, United Kingdom"},
-    {"city": "paris", "label": "Paris, France"},
-    {"city": "amsterdam", "label": "Amsterdam, Netherlands"},
-    {"city": "barcelona", "label": "Barcelona, Spain"},
-    {"city": "berlin", "label": "Berlin, Germany"},
-]
+DASHBOARD_URL = "https://modularsnapshotetl.streamlit.app/"
+
+# Full city catalog — derived from src/data_fetcher.CITY_CATALOG.
+# Each entry: {"slug": ..., "label": ...}
+# This is used by the Load Data page for the searchable city dropdown.
+def get_city_options() -> list[dict[str, str]]:
+    """Return the full list of cities from the data fetcher catalog."""
+    from src.data_fetcher import CITY_CATALOG
+    return [
+        {"slug": slug, "label": label}
+        for slug, _country, _region, _city, label in sorted(CITY_CATALOG, key=lambda c: c[4])
+    ]

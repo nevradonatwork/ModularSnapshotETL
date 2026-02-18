@@ -1,5 +1,7 @@
 # Production Deployment View
 
+**Live Dashboard:** [modularsnapshotetl.streamlit.app](https://modularsnapshotetl.streamlit.app/)
+
 ## Architecture
 
 In production, the pipeline runs as a scheduled job on a cloud platform (e.g., AWS, GCP).
@@ -78,6 +80,23 @@ Bounding boxes are configured in `CITY_BOUNDARIES` in `src/validation.py` for: n
 chicago, los-angeles, san-francisco, new-orleans. Cities without a configured bounding box
 have all rows pass (flag = 0). Adding a new city requires only adding its bounding box
 coordinates — no code changes needed.
+
+**Data Fetcher:** The platform includes an automated data fetcher (`src/data_fetcher.py`) that downloads
+listing data directly from [Inside Airbnb](https://insideairbnb.com/get-the-data/). It uses a 2-tier
+discovery strategy:
+
+1. **Live scrape** — parses the Inside Airbnb page for download links (works when HTML is server-rendered)
+2. **Built-in catalog** — a comprehensive catalog of **100 cities across 30+ countries** with exact
+   `data.insideairbnb.com` URL path components, used as a reliable fallback when the JS-rendered page
+   returns no links
+
+When using the catalog fallback, the fetcher probes `data.insideairbnb.com` with HEAD requests to
+discover the latest available snapshot date (checks days 1–5 of each month for the past 12 months).
+In production, this eliminates the manual step of downloading and placing files — users select a city
+from the dashboard and the pipeline handles ingestion end-to-end.
+
+The dashboard is deployed at [modularsnapshotetl.streamlit.app](https://modularsnapshotetl.streamlit.app/)
+and provides a searchable city dropdown covering all 100 catalogued cities.
 
 **Error Handling:** The pipeline handles:
 - Missing file (FileNotFoundError)
