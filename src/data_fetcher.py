@@ -5,6 +5,11 @@ Discovers available cities and snapshots from insideairbnb.com/get-the-data,
 downloads listings.csv.gz, neighbourhoods.csv, and neighbourhoods.geojson,
 and places them in the correct folder structure for the ETL pipeline.
 
+Strategy:
+    1. Try scraping the live page (works if server-rendered HTML)
+    2. Fall back to a comprehensive built-in catalog of ~100 cities with
+       known URL paths, then probe data.insideairbnb.com for latest dates
+
 Usage (CLI):
     python -m src.data_fetcher                     # interactive: pick city
     python -m src.data_fetcher --city new-york      # specific city
@@ -16,7 +21,6 @@ Usage (library):
 """
 
 import argparse
-import json
 import logging
 import os
 import re
@@ -24,7 +28,8 @@ import sys
 import time
 import urllib.request
 import urllib.error
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import date, timedelta
 from html.parser import HTMLParser
 
 logger = logging.getLogger(__name__)
@@ -46,45 +51,227 @@ class CitySnapshot:
 
 
 # ---------------------------------------------------------------------------
-# HTML parser for insideairbnb.com/get-the-data
+# Comprehensive city catalog — URL path components for data.insideairbnb.com
+#
+# Format: (city_slug, country_path, region_path, city_path, label)
+# URL pattern: http://data.insideairbnb.com/{country}/{region}/{city}/{date}/...
+# ---------------------------------------------------------------------------
+
+CITY_CATALOG: list[tuple[str, str, str, str, str]] = [
+    # ===== UNITED STATES =====
+    ("new-york-city",      "united-states", "ny",  "new-york-city",      "New York City, US"),
+    ("los-angeles",        "united-states", "ca",  "los-angeles",        "Los Angeles, US"),
+    ("san-francisco",      "united-states", "ca",  "san-francisco",      "San Francisco, US"),
+    ("san-diego",          "united-states", "ca",  "san-diego",          "San Diego, US"),
+    ("san-mateo-county",   "united-states", "ca",  "san-mateo-county",   "San Mateo County, US"),
+    ("santa-clara-county", "united-states", "ca",  "santa-clara-county", "Santa Clara County, US"),
+    ("santa-cruz-county",  "united-states", "ca",  "santa-cruz-county",  "Santa Cruz County, US"),
+    ("oakland",            "united-states", "ca",  "oakland",            "Oakland, US"),
+    ("pacific-grove",      "united-states", "ca",  "pacific-grove",      "Pacific Grove, US"),
+    ("chicago",            "united-states", "il",  "chicago",            "Chicago, US"),
+    ("austin",             "united-states", "tx",  "austin",             "Austin, US"),
+    ("dallas",             "united-states", "tx",  "dallas",             "Dallas, US"),
+    ("fort-worth",         "united-states", "tx",  "fort-worth",         "Fort Worth, US"),
+    ("boston",              "united-states", "ma",  "boston",              "Boston, US"),
+    ("cambridge",          "united-states", "ma",  "cambridge",          "Cambridge, US"),
+    ("seattle",            "united-states", "wa",  "seattle",            "Seattle, US"),
+    ("washington-dc",      "united-states", "dc",  "washington-dc",      "Washington D.C., US"),
+    ("portland",           "united-states", "or",  "portland",           "Portland, US"),
+    ("denver",             "united-states", "co",  "denver",             "Denver, US"),
+    ("nashville",          "united-states", "tn",  "nashville",          "Nashville, US"),
+    ("new-orleans",        "united-states", "la",  "new-orleans",        "New Orleans, US"),
+    ("asheville",          "united-states", "nc",  "asheville",          "Asheville, US"),
+    ("columbus",           "united-states", "oh",  "columbus",           "Columbus, US"),
+    ("cleveland",          "united-states", "oh",  "cleveland",          "Cleveland, US"),
+    ("hawaii",             "united-states", "hi",  "hawaii",             "Hawaii, US"),
+    ("jersey-city",        "united-states", "nj",  "jersey-city",        "Jersey City, US"),
+    ("newark",             "united-states", "nj",  "newark",             "Newark, US"),
+    ("minneapolis",        "united-states", "mn",  "minneapolis",        "Minneapolis, US"),
+    ("saint-paul",         "united-states", "mn",  "twin-cities-msa",    "Twin Cities MSA, US"),
+    ("rhode-island",       "united-states", "ri",  "rhode-island",       "Rhode Island, US"),
+    ("salem",              "united-states", "or",  "salem-or",           "Salem, US"),
+    ("rochester",          "united-states", "ny",  "rochester",          "Rochester, US"),
+    # ===== CANADA =====
+    ("toronto",            "canada",        "on",  "toronto",            "Toronto, Canada"),
+    ("montreal",           "canada",        "qc",  "montreal",           "Montreal, Canada"),
+    ("vancouver",          "canada",        "bc",  "vancouver",          "Vancouver, Canada"),
+    ("victoria",           "canada",        "bc",  "victoria",           "Victoria, Canada"),
+    ("ottawa",             "canada",        "on",  "ottawa",             "Ottawa, Canada"),
+    ("quebec-city",        "canada",        "qc",  "quebec-city",        "Quebec City, Canada"),
+    ("new-brunswick",      "canada",        "nb",  "new-brunswick",      "New Brunswick, Canada"),
+    ("winnipeg",           "canada",        "mb",  "winnipeg",           "Winnipeg, Canada"),
+    # ===== UNITED KINGDOM =====
+    ("london",             "united-kingdom", "england",  "london",           "London, UK"),
+    ("manchester",         "united-kingdom", "england",  "manchester",       "Manchester, UK"),
+    ("bristol",            "united-kingdom", "england",  "bristol",          "Bristol, UK"),
+    ("edinburgh",          "united-kingdom", "scotland", "edinburgh",        "Edinburgh, UK"),
+    ("glasgow",            "united-kingdom", "scotland", "glasgow",          "Glasgow, UK"),
+    # ===== SPAIN =====
+    ("barcelona",          "spain",         "catalonia",          "barcelona",          "Barcelona, Spain"),
+    ("madrid",             "spain",         "comunidad-de-madrid","madrid",             "Madrid, Spain"),
+    ("malaga",             "spain",         "andalucia",          "malaga",             "Malaga, Spain"),
+    ("sevilla",            "spain",         "andalucia",          "sevilla",            "Sevilla, Spain"),
+    ("girona",             "spain",         "catalonia",          "girona",             "Girona, Spain"),
+    ("mallorca",           "spain",         "islas-baleares",     "mallorca",           "Mallorca, Spain"),
+    ("menorca",            "spain",         "islas-baleares",     "menorca",            "Menorca, Spain"),
+    ("valencia",           "spain",         "comunitat-valenciana","valencia",           "Valencia, Spain"),
+    ("euskadi",            "spain",         "pais-vasco",         "euskadi",            "Basque Country, Spain"),
+    # ===== FRANCE =====
+    ("paris",              "france",        "ile-de-france",      "paris",              "Paris, France"),
+    ("lyon",               "france",        "auvergne-rhone-alpes","lyon",              "Lyon, France"),
+    ("bordeaux",           "france",        "nouvelle-aquitaine", "bordeaux",           "Bordeaux, France"),
+    # ===== ITALY =====
+    ("rome",               "italy",         "lazio",              "rome",               "Rome, Italy"),
+    ("milan",              "italy",         "lombardy",           "milan",              "Milan, Italy"),
+    ("florence",           "italy",         "tuscany",            "florence",           "Florence, Italy"),
+    ("venice",             "italy",         "veneto",             "venice",             "Venice, Italy"),
+    ("naples",             "italy",         "campania",           "naples",             "Naples, Italy"),
+    ("bologna",            "italy",         "emilia-romagna",     "bologna",            "Bologna, Italy"),
+    ("sicily",             "italy",         "sicily",             "sicily",             "Sicily, Italy"),
+    ("sardinia",           "italy",         "sardinia",           "sardinia",           "Sardinia, Italy"),
+    ("puglia",             "italy",         "puglia",             "puglia",             "Puglia, Italy"),
+    ("bergamo",            "italy",         "lombardy",           "bergamo",            "Bergamo, Italy"),
+    # ===== GERMANY =====
+    ("berlin",             "germany",       "be",                 "berlin",             "Berlin, Germany"),
+    ("munich",             "germany",       "by",                 "munich",             "Munich, Germany"),
+    # ===== NETHERLANDS =====
+    ("amsterdam",          "the-netherlands","north-holland",     "amsterdam",          "Amsterdam, Netherlands"),
+    # ===== PORTUGAL =====
+    ("lisbon",             "portugal",      "lisbon",             "lisbon",             "Lisbon, Portugal"),
+    ("porto",              "portugal",      "norte",              "porto",              "Porto, Portugal"),
+    # ===== GREECE =====
+    ("athens",             "greece",        "attica",             "athens",             "Athens, Greece"),
+    ("crete",              "greece",        "crete",              "crete",              "Crete, Greece"),
+    ("thessaloniki",       "greece",        "central-macedonia",  "thessaloniki",       "Thessaloniki, Greece"),
+    ("south-aegean",       "greece",        "south-aegean",       "south-aegean",       "South Aegean, Greece"),
+    # ===== IRELAND =====
+    ("dublin",             "ireland",       "leinster",           "dublin",             "Dublin, Ireland"),
+    # ===== BELGIUM =====
+    ("brussels",           "belgium",       "bru",                "brussels",           "Brussels, Belgium"),
+    ("antwerp",            "belgium",       "vlg",                "antwerp",            "Antwerp, Belgium"),
+    # ===== AUSTRIA =====
+    ("vienna",             "austria",       "vienna",             "vienna",             "Vienna, Austria"),
+    # ===== SWITZERLAND =====
+    ("geneva",             "switzerland",   "geneva",             "geneva",             "Geneva, Switzerland"),
+    ("zurich",             "switzerland",   "zurich",             "zurich",             "Zurich, Switzerland"),
+    # ===== DENMARK =====
+    ("copenhagen",         "denmark",       "hovedstaden",        "copenhagen",         "Copenhagen, Denmark"),
+    # ===== SWEDEN =====
+    ("stockholm",          "sweden",        "stockholms-lan",     "stockholm",          "Stockholm, Sweden"),
+    # ===== NORWAY =====
+    ("oslo",               "norway",        "oslo",               "oslo",               "Oslo, Norway"),
+    ("bergen",             "norway",        "western-norway",     "bergen",             "Bergen, Norway"),
+    # ===== CZECH REPUBLIC =====
+    ("prague",             "czech-republic","prague",             "prague",             "Prague, Czech Republic"),
+    # ===== TURKEY =====
+    ("istanbul",           "turkey",        "marmara",            "istanbul",           "Istanbul, Turkey"),
+    # ===== AUSTRALIA =====
+    ("sydney",             "australia",     "nsw",                "sydney",             "Sydney, Australia"),
+    ("melbourne",          "australia",     "vic",                "melbourne",          "Melbourne, Australia"),
+    ("northern-rivers",    "australia",     "nsw",                "northern-rivers",    "Northern Rivers, Australia"),
+    ("barossa-valley",     "australia",     "sa",                 "barossa-valley",     "Barossa Valley, Australia"),
+    ("tasmania",           "australia",     "tas",                "tasmania",           "Tasmania, Australia"),
+    ("western-australia",  "australia",     "wa",                 "western-australia",  "Western Australia"),
+    # ===== NEW ZEALAND =====
+    ("auckland",           "new-zealand",   "auckland",           "auckland",           "Auckland, NZ"),
+    # ===== JAPAN =====
+    ("tokyo",              "japan",         "kanto",              "tokyo",              "Tokyo, Japan"),
+    # ===== CHINA =====
+    ("hong-kong",          "china",         "hong-kong",          "hong-kong",          "Hong Kong, China"),
+    ("beijing",            "china",         "beijing",            "beijing",            "Beijing, China"),
+    ("shanghai",           "china",         "shanghai",           "shanghai",           "Shanghai, China"),
+    # ===== THAILAND =====
+    ("bangkok",            "thailand",      "central-thailand",   "bangkok",            "Bangkok, Thailand"),
+    # ===== SINGAPORE =====
+    ("singapore",          "singapore",     "sg",                 "singapore",          "Singapore"),
+    # ===== SOUTH AFRICA =====
+    ("cape-town",          "south-africa",  "wc",                 "cape-town",          "Cape Town, South Africa"),
+    # ===== MEXICO =====
+    ("mexico-city",        "mexico",        "df",                 "mexico-city",        "Mexico City, Mexico"),
+    # ===== BRAZIL =====
+    ("rio-de-janeiro",     "brazil",        "rj",                 "rio-de-janeiro",     "Rio de Janeiro, Brazil"),
+    # ===== ARGENTINA =====
+    ("buenos-aires",       "argentina",     "ciudad-autonoma-de-buenos-aires", "buenos-aires", "Buenos Aires, Argentina"),
+    # ===== COLOMBIA =====
+    ("medellin",           "colombia",      "antioquia",          "medellin",           "Medellin, Colombia"),
+    # ===== CUBA =====
+    ("havana",             "cuba",          "la-habana",          "havana",             "Havana, Cuba"),
+]
+
+
+# ---------------------------------------------------------------------------
+# URL builder from catalog
+# ---------------------------------------------------------------------------
+
+_DATA_BASE = "http://data.insideairbnb.com"
+
+
+def _build_urls(country: str, region: str, city: str, snapshot_date: str) -> dict[str, str]:
+    """Build the three download URLs from path components."""
+    base = f"{_DATA_BASE}/{country}/{region}/{city}/{snapshot_date}"
+    return {
+        "listings": f"{base}/data/listings.csv.gz",
+        "neighbourhoods_csv": f"{base}/visualisations/neighbourhoods.csv",
+        "neighbourhoods_geojson": f"{base}/visualisations/neighbourhoods.geojson",
+    }
+
+
+def _probe_date(country: str, region: str, city: str, candidate: str, timeout: int = 10) -> bool:
+    """Check if a snapshot date exists by sending a HEAD request for listings.csv.gz."""
+    url = f"{_DATA_BASE}/{country}/{region}/{city}/{candidate}/data/listings.csv.gz"
+    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def _discover_latest_date(country: str, region: str, city: str) -> str | None:
+    """Try recent 1st-of-month dates to find the latest available snapshot.
+
+    Inside Airbnb typically publishes on the 1st–5th of each month/quarter.
+    We probe the last 12 months of candidate dates.
+    """
+    today = date.today()
+    candidates = []
+    for months_ago in range(0, 13):
+        y = today.year
+        m = today.month - months_ago
+        while m <= 0:
+            m += 12
+            y -= 1
+        for day in (1, 2, 3, 4, 5):
+            try:
+                candidates.append(date(y, m, day).isoformat())
+            except ValueError:
+                pass
+
+    for candidate in candidates:
+        if _probe_date(country, region, city, candidate):
+            return candidate
+    return None
+
+
+# ---------------------------------------------------------------------------
+# HTML parser for insideairbnb.com/get-the-data (primary method)
 # ---------------------------------------------------------------------------
 
 class InsideAirbnbParser(HTMLParser):
-    """Parse the Inside Airbnb 'Get the Data' page to extract download links.
-
-    The page organises cities as <h2>/<h3> headings followed by <table> blocks
-    containing <a href="..."> links to data.insideairbnb.com.
-    """
+    """Parse the Inside Airbnb 'Get the Data' page to extract download links."""
 
     def __init__(self):
         super().__init__()
-        self.snapshots: list[CitySnapshot] = []
-        self._current_city_label = ""
-        self._in_heading = False
         self._links: list[str] = []
 
     def handle_starttag(self, tag, attrs):
-        if tag in ("h2", "h3"):
-            self._in_heading = True
-            self._heading_text = ""
         if tag == "a":
             href = dict(attrs).get("href", "")
             if "data.insideairbnb.com" in href:
                 self._links.append(href)
 
-    def handle_endtag(self, tag):
-        if tag in ("h2", "h3") and self._in_heading:
-            self._in_heading = False
-            self._current_city_label = self._heading_text.strip()
-
-    def handle_data(self, data):
-        if self._in_heading:
-            self._heading_text += data
-
     def build_snapshots(self) -> list[CitySnapshot]:
         """Group collected links into CitySnapshot objects."""
-        # Links follow the pattern:
-        # http(s)://data.insideairbnb.com/{country}/{region}/{city}/{date}/data/listings.csv.gz
         link_pattern = re.compile(
             r"https?://data\.insideairbnb\.com/"
             r"(?P<country>[^/]+)/(?P<region>[^/]+)/(?P<city>[^/]+)/"
@@ -92,7 +279,6 @@ class InsideAirbnbParser(HTMLParser):
             r"(?P<path>.+)"
         )
 
-        # Group links by (city, date)
         groups: dict[tuple[str, str], dict] = {}
         for url in self._links:
             m = link_pattern.match(url)
@@ -116,14 +302,14 @@ class InsideAirbnbParser(HTMLParser):
                 groups[key]["urls"]["neighbourhoods_geojson"] = url
 
         snapshots = []
-        for (city, date), info in sorted(groups.items(), key=lambda x: (x[0][0], x[0][1]), reverse=True):
+        for (city_slug, snap_date), info in sorted(groups.items()):
             if "listings" not in info["urls"]:
-                continue  # skip incomplete snapshots
+                continue
             snapshots.append(CitySnapshot(
-                city_slug=city,
-                city_label=city.replace("-", " ").title(),
+                city_slug=city_slug,
+                city_label=city_slug.replace("-", " ").title(),
                 country=info["country"],
-                snapshot_date=date,
+                snapshot_date=snap_date,
                 listings_url=info["urls"].get("listings", ""),
                 neighbourhoods_csv_url=info["urls"].get("neighbourhoods_csv", ""),
                 neighbourhoods_geojson_url=info["urls"].get("neighbourhoods_geojson", ""),
@@ -152,37 +338,95 @@ def _urlopen_with_retry(url: str, retries: int = 3, timeout: int = 30) -> bytes:
             if attempt == retries - 1:
                 raise
             wait = 2 ** (attempt + 1)
-            logger.warning("Attempt %d failed for %s: %s. Retrying in %ds...", attempt + 1, url, e, wait)
+            logger.warning("Attempt %d failed for %s: %s. Retrying in %ds...",
+                           attempt + 1, url, e, wait)
             time.sleep(wait)
-    return b""  # unreachable
+    return b""
 
 
-def discover_snapshots(page_url: str = "https://insideairbnb.com/get-the-data/") -> list[CitySnapshot]:
-    """Fetch the Inside Airbnb 'Get the Data' page and parse available snapshots."""
-    logger.info("Fetching %s ...", page_url)
-    html_bytes = _urlopen_with_retry(page_url, timeout=60)
-    html = html_bytes.decode("utf-8", errors="replace")
+# ---------------------------------------------------------------------------
+# Discovery: live scrape → catalog fallback
+# ---------------------------------------------------------------------------
 
-    parser = InsideAirbnbParser()
-    parser.feed(html)
-    snapshots = parser.build_snapshots()
-
-    # If JS-rendered page returned no links, try the old URL as fallback
-    if not snapshots and "get-the-data/" in page_url:
-        alt_url = page_url.replace("get-the-data/", "get-the-data.html")
-        logger.info("No links found, trying fallback URL: %s", alt_url)
+def _scrape_live_page() -> list[CitySnapshot]:
+    """Try to scrape the live Inside Airbnb page."""
+    for page_url in [
+        "https://insideairbnb.com/get-the-data/",
+        "http://insideairbnb.com/get-the-data.html",
+    ]:
         try:
-            html_bytes = _urlopen_with_retry(alt_url, timeout=60)
+            html_bytes = _urlopen_with_retry(page_url, timeout=60)
             html = html_bytes.decode("utf-8", errors="replace")
             parser = InsideAirbnbParser()
             parser.feed(html)
             snapshots = parser.build_snapshots()
-        except Exception:
-            pass
+            if snapshots:
+                logger.info("Live scrape found %d snapshots from %s", len(snapshots), page_url)
+                return snapshots
+        except Exception as e:
+            logger.debug("Live scrape failed for %s: %s", page_url, e)
+    return []
 
-    logger.info("Discovered %d snapshots across %d cities",
-                len(snapshots), len({s.city_slug for s in snapshots}))
+
+def _catalog_snapshots() -> list[CitySnapshot]:
+    """Build snapshots from the built-in catalog without date probing.
+
+    Returns entries with placeholder date '0000-00-00' — the caller should
+    use probe_catalog_city() or pass directly to fetch_city_data() which
+    will probe on demand.
+    """
+    snapshots = []
+    for slug, country, region, city, label in CITY_CATALOG:
+        urls = _build_urls(country, region, city, "PLACEHOLDER")
+        snapshots.append(CitySnapshot(
+            city_slug=slug,
+            city_label=label,
+            country=country,
+            snapshot_date="",
+            listings_url="",
+            neighbourhoods_csv_url="",
+            neighbourhoods_geojson_url="",
+        ))
     return snapshots
+
+
+def probe_catalog_city(slug: str) -> CitySnapshot | None:
+    """Find a city in the catalog and probe for its latest snapshot date."""
+    for cat_slug, country, region, city, label in CITY_CATALOG:
+        if cat_slug == slug:
+            logger.info("Probing for latest snapshot of %s ...", slug)
+            snap_date = _discover_latest_date(country, region, city)
+            if snap_date is None:
+                logger.warning("No recent snapshot found for %s", slug)
+                return None
+            urls = _build_urls(country, region, city, snap_date)
+            return CitySnapshot(
+                city_slug=slug,
+                city_label=label,
+                country=country,
+                snapshot_date=snap_date,
+                listings_url=urls["listings"],
+                neighbourhoods_csv_url=urls["neighbourhoods_csv"],
+                neighbourhoods_geojson_url=urls["neighbourhoods_geojson"],
+            )
+    return None
+
+
+def discover_snapshots() -> list[CitySnapshot]:
+    """Discover available cities — live scrape first, catalog fallback.
+
+    Returns a list of CitySnapshot objects. When falling back to catalog,
+    snapshot dates are empty; use probe_catalog_city() for a specific city.
+    """
+    # Try live scrape first
+    snapshots = _scrape_live_page()
+    if snapshots:
+        return snapshots
+
+    # Fall back to built-in catalog
+    logger.info("Live scrape returned no results. Using built-in catalog (%d cities).",
+                len(CITY_CATALOG))
+    return _catalog_snapshots()
 
 
 def get_latest_per_city(snapshots: list[CitySnapshot]) -> dict[str, CitySnapshot]:
@@ -208,7 +452,7 @@ def _download_file(url: str, dest_path: str) -> str:
     with urllib.request.urlopen(req, timeout=300) as resp:
         with open(dest_path, "wb") as f:
             while True:
-                chunk = resp.read(1024 * 256)  # 256 KB chunks
+                chunk = resp.read(1024 * 256)
                 if not chunk:
                     break
                 f.write(chunk)
@@ -224,43 +468,45 @@ def fetch_city_data(
 ) -> dict[str, str]:
     """Download all data files for a city and place them in dest_dir/{city_slug}/.
 
-    If no snapshot is provided, discovers available snapshots and picks the latest.
+    If no snapshot is provided (or snapshot has no URLs), discovers/probes automatically.
 
     Returns a dict of {file_type: local_path} for successfully downloaded files.
     """
-    if snapshot is None:
-        snapshots = discover_snapshots()
-        latest = get_latest_per_city(snapshots)
-        snapshot = latest.get(city_slug)
-        if snapshot is None:
-            # Try fuzzy match
-            for slug, snap in latest.items():
-                if city_slug in slug or slug in city_slug:
-                    snapshot = snap
-                    break
-        if snapshot is None:
-            available = sorted(latest.keys())
+    # If snapshot has no URLs (catalog fallback), probe for the real date
+    if snapshot is None or not snapshot.listings_url:
+        probed = probe_catalog_city(city_slug)
+        if probed is None:
+            # Try live discovery as last resort
+            snapshots = _scrape_live_page()
+            latest = get_latest_per_city(snapshots)
+            probed = latest.get(city_slug)
+            if probed is None:
+                for slug, snap in latest.items():
+                    if city_slug in slug or slug in city_slug:
+                        probed = snap
+                        break
+        if probed is None:
+            catalog_slugs = [c[0] for c in CITY_CATALOG]
             raise ValueError(
-                f"City '{city_slug}' not found. Available cities: {available}"
+                f"City '{city_slug}' not found or no recent snapshot available.\n"
+                f"Available cities in catalog: {sorted(catalog_slugs)}"
             )
+        snapshot = probed
 
     city_dir = os.path.join(dest_dir, city_slug)
     os.makedirs(city_dir, exist_ok=True)
     downloaded = {}
 
-    # listings.csv.gz
     if snapshot.listings_url:
         path = _download_file(snapshot.listings_url, os.path.join(city_dir, "listings.csv.gz"))
         if path:
             downloaded["listings"] = path
 
-    # neighbourhoods.csv
     if snapshot.neighbourhoods_csv_url:
         path = _download_file(snapshot.neighbourhoods_csv_url, os.path.join(city_dir, "neighbourhoods.csv"))
         if path:
             downloaded["neighbourhoods_csv"] = path
 
-    # neighbourhoods.geojson
     if snapshot.neighbourhoods_geojson_url:
         path = _download_file(snapshot.neighbourhoods_geojson_url, os.path.join(city_dir, "neighbourhoods.geojson"))
         if path:
@@ -307,21 +553,24 @@ def main():
     parser = argparse.ArgumentParser(
         description="Fetch Airbnb listing data from Inside Airbnb.",
     )
-    parser.add_argument("--list", action="store_true", help="List available cities and exit")
-    parser.add_argument("--city", type=str, help="City slug to download (e.g. new-york)")
-    parser.add_argument("--all", action="store_true", help="Download all available cities")
-    parser.add_argument("--dest", type=str, default="dataset", help="Destination directory (default: dataset)")
+    parser.add_argument("--list", action="store_true",
+                        help="List available cities and exit")
+    parser.add_argument("--city", type=str,
+                        help="City slug to download (e.g. new-york-city)")
+    parser.add_argument("--all", action="store_true",
+                        help="Download all available cities")
+    parser.add_argument("--dest", type=str, default="dataset",
+                        help="Destination directory (default: dataset)")
     args = parser.parse_args()
 
     if args.list:
-        snapshots = discover_snapshots()
-        latest = get_latest_per_city(snapshots)
-        print(f"\n{'City Slug':<30} {'Latest Snapshot':<15} {'Country'}")
-        print("-" * 65)
-        for slug in sorted(latest):
-            s = latest[slug]
-            print(f"{slug:<30} {s.snapshot_date:<15} {s.country}")
-        print(f"\n{len(latest)} cities available.")
+        # Show the full catalog (always available, no network needed)
+        print(f"\n{'City Slug':<30} {'Country':<20} {'Label'}")
+        print("-" * 75)
+        for slug, country, region, city, label in sorted(CITY_CATALOG, key=lambda c: c[0]):
+            print(f"{slug:<30} {country:<20} {label}")
+        print(f"\n{len(CITY_CATALOG)} cities in catalog.")
+        print("Use --city <slug> to download a specific city.")
         return
 
     if args.all:
@@ -337,24 +586,14 @@ def main():
             print(f"  {ftype}: {path}")
         return
 
-    # Interactive mode
-    print("Discovering available cities from Inside Airbnb...")
-    snapshots = discover_snapshots()
-    latest = get_latest_per_city(snapshots)
-    cities = sorted(latest.keys())
-
-    if not cities:
-        print("No cities found. The page may require JavaScript rendering.")
-        print("You can manually provide a URL via the dashboard's Load Data page.")
-        return
-
-    print(f"\n{len(cities)} cities available:\n")
-    for i, slug in enumerate(cities, 1):
-        s = latest[slug]
-        print(f"  {i:3d}. {slug:<30} ({s.snapshot_date})")
+    # Interactive mode — show catalog
+    print(f"\n{len(CITY_CATALOG)} cities available:\n")
+    sorted_catalog = sorted(CITY_CATALOG, key=lambda c: c[0])
+    for i, (slug, country, region, city, label) in enumerate(sorted_catalog, 1):
+        print(f"  {i:3d}. {slug:<30} {label}")
 
     try:
-        choice = input(f"\nEnter city number (1-{len(cities)}), or 'all': ").strip()
+        choice = input(f"\nEnter city number (1-{len(sorted_catalog)}), or 'all': ").strip()
     except (EOFError, KeyboardInterrupt):
         return
 
@@ -362,9 +601,9 @@ def main():
         results = fetch_all_cities(dest_dir=args.dest)
         successes = sum(1 for v in results.values() if "error" not in v)
         print(f"\nDone. {successes}/{len(results)} cities downloaded.")
-    elif choice.isdigit() and 1 <= int(choice) <= len(cities):
-        slug = cities[int(choice) - 1]
-        files = fetch_city_data(slug, snapshot=latest[slug], dest_dir=args.dest)
+    elif choice.isdigit() and 1 <= int(choice) <= len(sorted_catalog):
+        slug = sorted_catalog[int(choice) - 1][0]
+        files = fetch_city_data(slug, dest_dir=args.dest)
         print(f"\nDownloaded {len(files)} files for {slug}:")
         for ftype, path in files.items():
             print(f"  {ftype}: {path}")
