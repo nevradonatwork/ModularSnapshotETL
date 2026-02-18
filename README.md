@@ -2,6 +2,8 @@
 
 A layered data engineering platform that transforms raw Airbnb-style listing data into a SQLite analytical warehouse with dimensional modelling, data quality controls, and BI-ready reporting views.
 
+**Live Dashboard:** [modularsnapshotetl.streamlit.app](https://modularsnapshotetl.streamlit.app/)
+
 ## Quick Start
 
 ```bash
@@ -267,6 +269,42 @@ SELECT * FROM rec_avg_price_comparison WHERE match_status != 'MATCH';
 SELECT * FROM rec_reporting_view_comparison WHERE match_status != 'MATCH';
 ```
 
+## Data Fetcher — Automatic City Discovery
+
+The platform includes a built-in data fetcher (`src/data_fetcher.py`) that can automatically download listing data from [Inside Airbnb](https://insideairbnb.com/get-the-data/).
+
+**Strategy (2-tier discovery):**
+
+1. **Live scrape** — parses `insideairbnb.com/get-the-data/` for download links. Works when the page serves static HTML.
+2. **Built-in catalog fallback** — since the page is a React SPA (JavaScript-rendered), the live scrape may return no results. The catalog contains **100 cities across 30+ countries** with their exact `data.insideairbnb.com` URL path components. When a city is selected, the fetcher sends HEAD requests to probe for the latest available snapshot date.
+
+### Catalog Coverage
+
+| Region | Cities |
+|--------|--------|
+| United States | 32 — New York, Los Angeles, San Francisco, Chicago, Seattle, Austin, Denver, Nashville, Boston, Washington D.C., and more |
+| Canada | 8 — Toronto, Montreal, Vancouver, Ottawa, Quebec City, Victoria, New Brunswick, Winnipeg |
+| United Kingdom | 5 — London, Manchester, Bristol, Edinburgh, Glasgow |
+| Spain | 9 — Barcelona, Madrid, Mallorca, Valencia, Sevilla, Malaga, Girona, Menorca, Basque Country |
+| Italy | 10 — Rome, Milan, Florence, Venice, Naples, Bologna, Sicily, Sardinia, Puglia, Bergamo |
+| France | 3 — Paris, Lyon, Bordeaux |
+| Germany | 2 — Berlin, Munich |
+| Netherlands | 1 — Amsterdam |
+| Portugal | 2 — Lisbon, Porto |
+| Greece | 4 — Athens, Crete, Thessaloniki, South Aegean |
+| Australia | 6 — Sydney, Melbourne, Tasmania, Northern Rivers, Barossa Valley, Western Australia |
+| Other | Ireland, Belgium, Austria, Switzerland, Denmark, Sweden, Norway, Czech Republic, Turkey, New Zealand, Japan, China, Thailand, Singapore, South Africa, Mexico, Brazil, Argentina, Colombia, Cuba |
+
+### CLI Usage
+
+```bash
+python -m src.data_fetcher --list              # list all 100 cities
+python -m src.data_fetcher --city new-york-city # download a specific city
+python -m src.data_fetcher --all               # download all cities
+```
+
+To add a new city, add one line to `CITY_CATALOG` in `src/data_fetcher.py` with the URL path components.
+
 ## Running Tests
 
 ```bash
@@ -293,6 +331,7 @@ When running with `-v`, each test line shows `PASSED` / `FAILED`; the final line
 ```
 ModularSnapshotETL/
 ├── main.py                # Entry point — creates ModularSnapshotETL.db, discovers cities, runs pipeline
+├── app.py                 # Streamlit dashboard entry point
 ├── crontab                # Schedule definition for the orchestrator
 ├── requirements.txt       # Python dependencies
 ├── src/
@@ -304,7 +343,20 @@ ModularSnapshotETL/
 │   ├── dimensions.py      # Dimension table upserts (SCD2)
 │   ├── facts.py           # Fact table loading and aggregations
 │   ├── reconciliation.py  # Data comparison across layers
-│   └── pipeline.py        # Orchestrates the full execution flow
+│   ├── pipeline.py        # Orchestrates the full execution flow
+│   └── data_fetcher.py    # Inside Airbnb data fetcher (100-city catalog + live scraper)
+├── pages/
+│   ├── 1_Home.py          # Dashboard home / project overview
+│   ├── 2_Load_Data.py     # City selection + ETL pipeline runner
+│   ├── 3_Dashboard.py     # Interactive analytics dashboard
+│   └── 4_Data_Dictionary.py # Table/column documentation
+├── dashboard/
+│   ├── constants.py       # App-wide constants and city catalog
+│   ├── db.py              # Database query helpers
+│   ├── charts.py          # Chart visualization functions
+│   ├── filters.py         # City and filter rendering
+│   ├── pipeline_runner.py # ETL pipeline execution for the dashboard
+│   └── data_dictionary.py # Data dictionary utilities
 ├── tests/
 │   ├── conftest.py        # Shared fixtures (in-memory DB, sample data)
 │   ├── test_ingestion.py  # Raw/staging layer tests
@@ -315,6 +367,15 @@ ModularSnapshotETL/
 │   └── test_main.py       # City discovery tests
 ├── dataset/               # Input: dataset/<city>/listings.csv.gz (not committed)
 └── ModularSnapshotETL.db  # Output: SQLite database (not committed)
+```
+
+## Live Dashboard
+
+The Streamlit dashboard is deployed at: [modularsnapshotetl.streamlit.app](https://modularsnapshotetl.streamlit.app/)
+
+To run locally:
+```bash
+streamlit run app.py
 ```
 
 ## Email Notifications
