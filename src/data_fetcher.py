@@ -29,6 +29,7 @@ import re
 import time
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
 from html.parser import HTMLParser
@@ -217,7 +218,7 @@ def _build_urls(country: str, region: str, city: str, snapshot_date: str) -> dic
     }
 
 
-def _probe_date(country: str, region: str, city: str, candidate: str, timeout: int = 10) -> bool:
+def _probe_date(country: str, region: str, city: str, candidate: str, timeout: int = 8) -> bool:
     """Check if a snapshot date exists by sending a HEAD request for listings.csv.gz."""
     url = f"{_DATA_BASE}/{country}/{region}/{city}/{candidate}/data/listings.csv.gz"
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _USER_AGENT})
@@ -229,28 +230,48 @@ def _probe_date(country: str, region: str, city: str, candidate: str, timeout: i
 
 
 def _discover_latest_date(country: str, region: str, city: str) -> str | None:
-    """Try recent 1st-of-month dates to find the latest available snapshot.
+    """Find the latest available snapshot by probing candidate dates in parallel.
 
-    Inside Airbnb typically publishes on the 1st–5th of each month/quarter.
-    We probe the last 12 months of candidate dates.
+    Inside Airbnb publishes on varying days (1st, 5th, 10th, 20th, 29th, etc.).
+    We generate candidates across the last 6 months and probe them concurrently
+    using a thread pool, so the total time is ~8-10 seconds instead of minutes.
     """
     today = date.today()
+
+    # Generate candidate dates: common publishing days across last 6 months
+    probe_days = (1, 2, 3, 4, 5, 8, 10, 12, 15, 18, 20, 22, 25, 27, 28, 29, 30)
     candidates = []
-    for months_ago in range(0, 13):
+    for months_ago in range(0, 7):
         y = today.year
         m = today.month - months_ago
         while m <= 0:
             m += 12
             y -= 1
-        for day in (1, 2, 3, 4, 5):
+        for day in probe_days:
             try:
                 candidates.append(date(y, m, day).isoformat())
             except ValueError:
                 pass
 
-    for candidate in candidates:
-        if _probe_date(country, region, city, candidate):
-            return candidate
+    # Sort newest first so the first hit is the latest
+    candidates.sort(reverse=True)
+
+    # Probe all candidates in parallel
+    found_dates: list[str] = []
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        future_to_date = {
+            pool.submit(_probe_date, country, region, city, c): c
+            for c in candidates
+        }
+        for future in as_completed(future_to_date):
+            if future.result():
+                found_dates.append(future_to_date[future])
+
+    if found_dates:
+        # Return the most recent date
+        found_dates.sort(reverse=True)
+        logger.info("Found %d snapshots for %s, latest: %s", len(found_dates), city, found_dates[0])
+        return found_dates[0]
     return None
 
 
