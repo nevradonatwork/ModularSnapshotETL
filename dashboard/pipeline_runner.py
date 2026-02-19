@@ -23,23 +23,22 @@ logger = logging.getLogger(__name__)
 
 
 def _geolocate_ip(ip: str) -> dict:
-    """Resolve an IP address to city/country using ip-api.com (free, no key).
+    """Resolve an IP address to city/country using ip2location.io.
 
     Returns {"city": ..., "country": ...} or empty strings on failure.
-    The API allows 45 requests/minute on the free tier — more than enough.
+    Free tier allows 1,000 queries/day without an API key.
     """
     if not ip or ip in ("127.0.0.1", "::1", "localhost"):
         return {"city": "", "country": ""}
     try:
-        url = f"http://ip-api.com/json/{ip}?fields=status,city,country"
+        url = f"https://api.ip2location.io/?ip={ip}"
         req = urllib.request.Request(url, headers={"User-Agent": "ModularSnapshotETL/1.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            if data.get("status") == "success":
-                return {
-                    "city": data.get("city", ""),
-                    "country": data.get("country", ""),
-                }
+            return {
+                "city": data.get("city_name", ""),
+                "country": data.get("country_name", ""),
+            }
     except Exception as e:
         logger.debug("IP geolocation failed for %s: %s", ip, e)
     return {"city": "", "country": ""}
