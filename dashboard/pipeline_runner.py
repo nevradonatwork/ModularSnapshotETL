@@ -22,30 +22,45 @@ from dashboard.constants import DB_PATH
 logger = logging.getLogger(__name__)
 
 
-def _geolocate_ip(ip: str) -> dict:
+def _is_private_ip(ip: str) -> bool:
+    """Return True if the IP is a private/local address."""
+    if not ip:
+        return True
+    return (
+        ip.startswith(("127.", "10.", "192.168.", "0."))
+        or ip.startswith("172.") and 16 <= int(ip.split(".")[1]) <= 31
+        or ip in ("::1", "localhost")
+    )
+
+
+def _geolocate_ip(ip: str | None) -> dict:
     """Resolve an IP address to city/country using ip2location.io.
 
-    Returns {"city": ..., "country": ...} or empty strings on failure.
+    If the IP is private/local or missing, calls the API without an ip
+    parameter so it auto-detects the server's public IP.
     Free tier allows 1,000 queries/day without an API key.
     """
-    if not ip or ip in ("127.0.0.1", "::1", "localhost"):
-        return {"city": "", "country": ""}
     try:
-        url = f"https://api.ip2location.io/?ip={ip}"
+        if ip and not _is_private_ip(ip):
+            url = f"https://api.ip2location.io/?ip={ip}&format=json"
+        else:
+            # No usable client IP — let the API auto-detect
+            url = "https://api.ip2location.io/?format=json"
         req = urllib.request.Request(url, headers={"User-Agent": "ModularSnapshotETL/1.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return {
+                "ip": data.get("ip", ""),
                 "city": data.get("city_name", ""),
                 "country": data.get("country_name", ""),
             }
     except Exception as e:
         logger.debug("IP geolocation failed for %s: %s", ip, e)
-    return {"city": "", "country": ""}
+    return {"ip": "", "city": "", "country": ""}
 
 
 def _get_client_metadata() -> dict:
-    """Extract client IP, browser info, and geolocation from Streamlit headers."""
+    """Extract client IP and geolocation from Streamlit headers."""
     ip = None
     user_agent = None
     try:
@@ -61,10 +76,11 @@ def _get_client_metadata() -> dict:
         pass
 
     ip = ip or None
-    geo = _geolocate_ip(ip) if ip else {"city": "", "country": ""}
+    # Always call geolocation — if IP is local/missing, API auto-detects
+    geo = _geolocate_ip(ip)
 
     return {
-        "client_ip": ip,
+        "client_ip": geo.get("ip") or ip or None,
         "client_user_agent": user_agent or None,
         "client_city": geo["city"] or None,
         "client_country": geo["country"] or None,
