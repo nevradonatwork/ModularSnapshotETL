@@ -44,19 +44,14 @@ def _create_etl_tables(cur: sqlite3.Cursor) -> None:
             archived_file_path  TEXT,
             row_counts          TEXT,
             error_message       TEXT,
-            triggered_by        TEXT,
-            client_ip           TEXT,
-            client_user_agent   TEXT,
-            client_city         TEXT,
-            client_country      TEXT
+            triggered_by        TEXT
         )
     """)
 
-    # Migrate existing databases: add client metadata columns if missing
+    # Migrate existing databases: add triggered_by column if missing
     existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(etl_run_log)").fetchall()}
-    for col in ("triggered_by", "client_ip", "client_user_agent", "client_city", "client_country"):
-        if col not in existing_cols:
-            cur.execute(f"ALTER TABLE etl_run_log ADD COLUMN {col} TEXT")
+    if "triggered_by" not in existing_cols:
+        cur.execute("ALTER TABLE etl_run_log ADD COLUMN triggered_by TEXT")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS etl_error_log (

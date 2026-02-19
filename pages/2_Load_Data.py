@@ -168,22 +168,11 @@ if os.path.exists(DB_PATH):
         import sqlite3
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 
-        # Check which columns exist (handles DB created before client metadata was added)
-        cursor = conn.execute("PRAGMA table_info(etl_run_log)")
-        existing_cols = {row[1] for row in cursor.fetchall()}
-        has_client_cols = "client_ip" in existing_cols
-
-        has_geo_cols = "client_city" in existing_cols
-        extra_cols = ""
-        if has_client_cols:
-            extra_cols += ", triggered_by"
-        if has_geo_cols:
-            extra_cols += ", client_city, client_country"
         runs = pd.read_sql(
-            f"""
+            """
             SELECT run_id, start_time, end_time, status, city, snapshot_month,
                    source_file_name, archived_file_path, row_counts,
-                   error_message{extra_cols}
+                   error_message, triggered_by
             FROM etl_run_log
             ORDER BY start_time DESC
             LIMIT 20
@@ -193,19 +182,8 @@ if os.path.exists(DB_PATH):
         if runs.empty:
             st.info("No pipeline runs recorded yet.")
         else:
-            # Build a "location" column for the summary table
-            if has_geo_cols and "client_city" in runs.columns:
-                runs["client_location"] = runs.apply(
-                    lambda r: ", ".join(filter(None, [r.get("client_city", ""), r.get("client_country", "")])) or "N/A",
-                    axis=1,
-                )
-
             # Show summary table with key columns
-            display_cols = ["run_id", "start_time", "status", "city", "snapshot_month"]
-            if has_client_cols:
-                display_cols += ["triggered_by"]
-            if has_geo_cols and "client_location" in runs.columns:
-                display_cols += ["client_location"]
+            display_cols = ["run_id", "start_time", "status", "city", "snapshot_month", "triggered_by"]
             st.dataframe(
                 runs[[c for c in display_cols if c in runs.columns]],
                 use_container_width=True,
@@ -227,19 +205,8 @@ if os.path.exists(DB_PATH):
                     st.markdown(f"**Start:** {run_row['start_time']}")
                     st.markdown(f"**End:** {run_row['end_time']}")
 
-                    # Client metadata section
-                    if has_client_cols or has_geo_cols:
-                        st.markdown("---")
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            triggered = run_row.get("triggered_by", "") if has_client_cols else ""
-                            st.markdown(f"**Triggered By:** `{triggered or 'cli'}`")
-                        with c2:
-                            geo_city = run_row.get("client_city", "") if has_geo_cols else ""
-                            geo_country = run_row.get("client_country", "") if has_geo_cols else ""
-                            location = ", ".join(filter(None, [geo_city, geo_country])) or "N/A"
-                            st.markdown(f"**Location:** {location}")
-                        st.markdown("---")
+                    triggered = run_row.get("triggered_by", "")
+                    st.markdown(f"**Triggered By:** `{triggered or 'cli'}`")
 
                     if run_row["archived_file_path"]:
                         st.markdown(f"**Archived File:** `{run_row['archived_file_path']}`")
