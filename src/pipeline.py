@@ -49,10 +49,6 @@ def run(
     dataset_path: str,
     city: str,
     triggered_by: str | None = None,
-    client_ip: str | None = None,
-    client_user_agent: str | None = None,
-    client_city: str | None = None,
-    client_country: str | None = None,
 ) -> dict:
     """Run the full pipeline for a single city/file.
 
@@ -61,10 +57,6 @@ def run(
         dataset_path: Path to the listings CSV (or .csv.gz) file.
         city: City name identifier.
         triggered_by: How the run was triggered (e.g. "dashboard", "cli").
-        client_ip: IP address of the client (dashboard runs only).
-        client_user_agent: Browser User-Agent string (dashboard runs only).
-        client_city: Geolocation city of the client (from IP lookup).
-        client_country: Geolocation country of the client (from IP lookup).
 
     Returns:
         dict with execution metrics (row counts per layer).
@@ -72,9 +64,7 @@ def run(
     # Create run record with file metadata (before validation so failures are logged)
     run_id = etl_logging.start_run(
         conn, city=city, source_file_path=dataset_path,
-        triggered_by=triggered_by, client_ip=client_ip,
-        client_user_agent=client_user_agent,
-        client_city=client_city, client_country=client_country,
+        triggered_by=triggered_by,
     )
     row_counts = {}
 

@@ -19,18 +19,14 @@ def start_run(
     snapshot_month: str | None = None,
     source_file_path: str | None = None,
     triggered_by: str | None = None,
-    client_ip: str | None = None,
-    client_user_agent: str | None = None,
-    client_city: str | None = None,
-    client_country: str | None = None,
 ) -> int:
     """Create a new ETL run record and return its run_id."""
     source_file_name = os.path.basename(source_file_path) if source_file_path else None
     cur = conn.execute(
         """INSERT INTO etl_run_log
            (start_time, status, city, snapshot_month, source_file_path, source_file_name,
-            triggered_by, client_ip, client_user_agent, client_city, client_country)
-           VALUES (?, 'RUNNING', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            triggered_by)
+           VALUES (?, 'RUNNING', ?, ?, ?, ?, ?)""",
         (
             datetime.now(timezone.utc).isoformat(),
             city,
@@ -38,10 +34,6 @@ def start_run(
             source_file_path,
             source_file_name,
             triggered_by or "cli",
-            client_ip,
-            client_user_agent,
-            client_city,
-            client_country,
         ),
     )
     conn.commit()
