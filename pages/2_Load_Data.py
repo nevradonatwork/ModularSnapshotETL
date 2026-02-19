@@ -167,10 +167,18 @@ if os.path.exists(DB_PATH):
     try:
         import sqlite3
         conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+
+        # Check which columns exist (handles DB created before client metadata was added)
+        cursor = conn.execute("PRAGMA table_info(etl_run_log)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        has_client_cols = "client_ip" in existing_cols
+
+        extra_cols = ", triggered_by, client_ip, client_user_agent" if has_client_cols else ""
         runs = pd.read_sql(
-            """
+            f"""
             SELECT run_id, start_time, end_time, status, city, snapshot_month,
-                   source_file_name, archived_file_path, row_counts, error_message
+                   source_file_name, archived_file_path, row_counts,
+                   error_message{extra_cols}
             FROM etl_run_log
             ORDER BY start_time DESC
             LIMIT 20
@@ -180,9 +188,12 @@ if os.path.exists(DB_PATH):
         if runs.empty:
             st.info("No pipeline runs recorded yet.")
         else:
+            # Show summary table with key columns
+            display_cols = ["run_id", "start_time", "status", "city", "snapshot_month"]
+            if has_client_cols:
+                display_cols += ["triggered_by", "client_ip"]
             st.dataframe(
-                runs[["run_id", "start_time", "end_time", "status", "city",
-                      "snapshot_month", "source_file_name"]],
+                runs[[c for c in display_cols if c in runs.columns]],
                 use_container_width=True,
                 hide_index=True,
             )
@@ -201,6 +212,37 @@ if os.path.exists(DB_PATH):
                     st.markdown(f"**Snapshot Month:** {run_row['snapshot_month']}")
                     st.markdown(f"**Start:** {run_row['start_time']}")
                     st.markdown(f"**End:** {run_row['end_time']}")
+
+                    # Client metadata section
+                    if has_client_cols:
+                        st.markdown("---")
+                        st.markdown("**Triggered By**")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            triggered = run_row.get("triggered_by", "")
+                            st.markdown(f"**Source:** `{triggered or 'cli'}`")
+                            ip = run_row.get("client_ip", "")
+                            st.markdown(f"**Client IP:** `{ip or 'N/A'}`")
+                        with c2:
+                            ua = run_row.get("client_user_agent", "")
+                            if ua:
+                                # Parse browser name from User-Agent
+                                browser = "Unknown"
+                                ua_lower = ua.lower()
+                                if "edg/" in ua_lower:
+                                    browser = "Edge"
+                                elif "chrome/" in ua_lower and "safari/" in ua_lower:
+                                    browser = "Chrome"
+                                elif "firefox/" in ua_lower:
+                                    browser = "Firefox"
+                                elif "safari/" in ua_lower:
+                                    browser = "Safari"
+                                st.markdown(f"**Browser:** {browser}")
+                                st.caption(f"`{ua[:120]}{'...' if len(ua) > 120 else ''}`")
+                            else:
+                                st.markdown("**Browser:** N/A")
+                        st.markdown("---")
+
                     if run_row["archived_file_path"]:
                         st.markdown(f"**Archived File:** `{run_row['archived_file_path']}`")
 

@@ -16,11 +16,32 @@ from src.pipeline import run as pipeline_run
 from dashboard.constants import DB_PATH
 
 
+def _get_client_metadata() -> dict:
+    """Extract client IP and browser info from Streamlit request headers."""
+    ip = None
+    user_agent = None
+    try:
+        headers = st.context.headers
+        # Streamlit Cloud sets X-Forwarded-For for the real client IP
+        ip = (
+            headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or headers.get("X-Real-Ip", "")
+            or headers.get("Remote-Addr", "")
+        )
+        user_agent = headers.get("User-Agent", "")
+    except Exception:
+        pass
+    return {"client_ip": ip or None, "client_user_agent": user_agent or None}
+
+
 def run_with_progress(city: str, dataset_path: str) -> dict:
     """Run the full pipeline for a city, showing Streamlit status updates.
 
     Returns the row_counts dict on success, or raises on failure.
     """
+    # Capture client metadata before the pipeline runs
+    meta = _get_client_metadata()
+
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -34,7 +55,12 @@ def run_with_progress(city: str, dataset_path: str) -> dict:
             st.write("Building fact tables...")
             st.write("Running reconciliation...")
 
-            row_counts = pipeline_run(conn, dataset_path, city)
+            row_counts = pipeline_run(
+                conn, dataset_path, city,
+                triggered_by="dashboard",
+                client_ip=meta["client_ip"],
+                client_user_agent=meta["client_user_agent"],
+            )
 
             status.update(label="Pipeline complete!", state="complete")
 

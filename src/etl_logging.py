@@ -18,24 +18,31 @@ def start_run(
     city: str | None = None,
     snapshot_month: str | None = None,
     source_file_path: str | None = None,
+    triggered_by: str | None = None,
+    client_ip: str | None = None,
+    client_user_agent: str | None = None,
 ) -> int:
     """Create a new ETL run record and return its run_id."""
     source_file_name = os.path.basename(source_file_path) if source_file_path else None
     cur = conn.execute(
         """INSERT INTO etl_run_log
-           (start_time, status, city, snapshot_month, source_file_path, source_file_name)
-           VALUES (?, 'RUNNING', ?, ?, ?, ?)""",
+           (start_time, status, city, snapshot_month, source_file_path, source_file_name,
+            triggered_by, client_ip, client_user_agent)
+           VALUES (?, 'RUNNING', ?, ?, ?, ?, ?, ?, ?)""",
         (
             datetime.now(timezone.utc).isoformat(),
             city,
             snapshot_month,
             source_file_path,
             source_file_name,
+            triggered_by or "cli",
+            client_ip,
+            client_user_agent,
         ),
     )
     conn.commit()
     run_id = cur.lastrowid
-    logger.info("ETL run started: run_id=%d city=%s", run_id, city)
+    logger.info("ETL run started: run_id=%d city=%s triggered_by=%s", run_id, city, triggered_by)
     return run_id
 
 

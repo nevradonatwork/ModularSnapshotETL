@@ -44,13 +44,23 @@ from src.validation import validate_file, validate_data_quality
 logger = logging.getLogger(__name__)
 
 
-def run(conn: sqlite3.Connection, dataset_path: str, city: str) -> dict:
+def run(
+    conn: sqlite3.Connection,
+    dataset_path: str,
+    city: str,
+    triggered_by: str | None = None,
+    client_ip: str | None = None,
+    client_user_agent: str | None = None,
+) -> dict:
     """Run the full pipeline for a single city/file.
 
     Args:
         conn: SQLite database connection.
         dataset_path: Path to the listings CSV (or .csv.gz) file.
         city: City name identifier.
+        triggered_by: How the run was triggered (e.g. "dashboard", "cli").
+        client_ip: IP address of the client (dashboard runs only).
+        client_user_agent: Browser User-Agent string (dashboard runs only).
 
     Returns:
         dict with execution metrics (row counts per layer).
@@ -58,6 +68,8 @@ def run(conn: sqlite3.Connection, dataset_path: str, city: str) -> dict:
     # Create run record with file metadata (before validation so failures are logged)
     run_id = etl_logging.start_run(
         conn, city=city, source_file_path=dataset_path,
+        triggered_by=triggered_by, client_ip=client_ip,
+        client_user_agent=client_user_agent,
     )
     row_counts = {}
 
