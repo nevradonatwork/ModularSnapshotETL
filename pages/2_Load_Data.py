@@ -176,7 +176,7 @@ if os.path.exists(DB_PATH):
         has_geo_cols = "client_city" in existing_cols
         extra_cols = ""
         if has_client_cols:
-            extra_cols += ", triggered_by, client_ip, client_user_agent"
+            extra_cols += ", triggered_by"
         if has_geo_cols:
             extra_cols += ", client_city, client_country"
         runs = pd.read_sql(
@@ -203,7 +203,7 @@ if os.path.exists(DB_PATH):
             # Show summary table with key columns
             display_cols = ["run_id", "start_time", "status", "city", "snapshot_month"]
             if has_client_cols:
-                display_cols += ["triggered_by", "client_ip"]
+                display_cols += ["triggered_by"]
             if has_geo_cols and "client_location" in runs.columns:
                 display_cols += ["client_location"]
             st.dataframe(
@@ -228,39 +228,17 @@ if os.path.exists(DB_PATH):
                     st.markdown(f"**End:** {run_row['end_time']}")
 
                     # Client metadata section
-                    if has_client_cols:
+                    if has_client_cols or has_geo_cols:
                         st.markdown("---")
-                        st.markdown("**Triggered By**")
-                        c1, c2, c3 = st.columns(3)
+                        c1, c2 = st.columns(2)
                         with c1:
-                            triggered = run_row.get("triggered_by", "")
-                            st.markdown(f"**Source:** `{triggered or 'cli'}`")
-                            ip = run_row.get("client_ip", "")
-                            st.markdown(f"**Client IP:** `{ip or 'N/A'}`")
+                            triggered = run_row.get("triggered_by", "") if has_client_cols else ""
+                            st.markdown(f"**Triggered By:** `{triggered or 'cli'}`")
                         with c2:
-                            # Location from IP geolocation
                             geo_city = run_row.get("client_city", "") if has_geo_cols else ""
                             geo_country = run_row.get("client_country", "") if has_geo_cols else ""
                             location = ", ".join(filter(None, [geo_city, geo_country])) or "N/A"
                             st.markdown(f"**Location:** {location}")
-                        with c3:
-                            ua = run_row.get("client_user_agent", "")
-                            if ua:
-                                # Parse browser name from User-Agent
-                                browser = "Unknown"
-                                ua_lower = ua.lower()
-                                if "edg/" in ua_lower:
-                                    browser = "Edge"
-                                elif "chrome/" in ua_lower and "safari/" in ua_lower:
-                                    browser = "Chrome"
-                                elif "firefox/" in ua_lower:
-                                    browser = "Firefox"
-                                elif "safari/" in ua_lower:
-                                    browser = "Safari"
-                                st.markdown(f"**Browser:** {browser}")
-                                st.caption(f"`{ua[:120]}{'...' if len(ua) > 120 else ''}`")
-                            else:
-                                st.markdown("**Browser:** N/A")
                         st.markdown("---")
 
                     if run_row["archived_file_path"]:
