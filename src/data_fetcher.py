@@ -238,10 +238,10 @@ def _discover_latest_date(country: str, region: str, city: str) -> str | None:
     """
     today = date.today()
 
-    # Generate candidate dates: common publishing days across last 6 months
+    # Generate candidate dates: common publishing days across last 18 months
     probe_days = (1, 2, 3, 4, 5, 8, 10, 12, 15, 18, 20, 22, 25, 27, 28, 29, 30)
     candidates = []
-    for months_ago in range(0, 7):
+    for months_ago in range(0, 19):
         y = today.year
         m = today.month - months_ago
         while m <= 0:
@@ -258,7 +258,7 @@ def _discover_latest_date(country: str, region: str, city: str) -> str | None:
 
     # Probe all candidates in parallel
     found_dates: list[str] = []
-    with ThreadPoolExecutor(max_workers=20) as pool:
+    with ThreadPoolExecutor(max_workers=40) as pool:
         future_to_date = {
             pool.submit(_probe_date, country, region, city, c): c
             for c in candidates

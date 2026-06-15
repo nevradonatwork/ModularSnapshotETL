@@ -18,6 +18,31 @@ from dashboard.constants import DATASET_DIR, LISTING_FILENAME, DB_PATH, CITY_OPT
 from dashboard.pipeline_runner import run_with_progress
 from src.validation import REQUIRED_COLUMNS
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_live_data() -> tuple[list[tuple[str, str]], dict]:
+    """Fetch city list from Inside Airbnb; fall back to built-in catalog.
+
+    Returns (city_options, snapshot_map) where snapshot_map maps slug ->
+    CitySnapshot (only populated when live scraping succeeds).
+    """
+    try:
+        from src.data_fetcher import _scrape_live_page, CITY_CATALOG, get_latest_per_city
+        snapshots = _scrape_live_page()
+        if snapshots:
+            catalog_labels = {slug: label for slug, _c, _r, _ci, label in CITY_CATALOG}
+            latest = get_latest_per_city(snapshots)
+            options: dict[str, str] = {}
+            for slug, snap in latest.items():
+                label = catalog_labels.get(slug, snap.city_label)
+                options[slug] = label
+            sorted_options = sorted(options.items(), key=lambda x: x[1])
+            return sorted_options, latest
+    except Exception:
+        pass
+    return CITY_OPTIONS, {}
+
+
 # ---------------------------------------------------------------------------
 # Page Header — Data Source Explanation
 # ---------------------------------------------------------------------------
@@ -45,8 +70,9 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.header("Select City")
 
-city_labels = [label for _slug, label in CITY_OPTIONS]
-slug_by_label = {label: slug for slug, label in CITY_OPTIONS}
+_city_options, _live_snapshots = _load_live_data()
+city_labels = [label for _slug, label in _city_options]
+slug_by_label = {label: slug for slug, label in _city_options}
 
 selected_label = st.selectbox(
     "Search and select a city",
@@ -80,7 +106,10 @@ if st.button("Ingest & Run Pipeline", disabled=run_disabled, type="primary"):
     try:
         with st.status("Fetching data from Inside Airbnb...", expanded=True) as status:
             st.write(f"Probing latest snapshot for **{selected_label}**...")
-            snapshot = probe_catalog_city(city_slug)
+            # Use pre-fetched snapshot from live scrape if available
+            snapshot = _live_snapshots.get(city_slug)
+            if snapshot is None:
+                snapshot = probe_catalog_city(city_slug)
             if snapshot is None:
                 st.error(
                     f"No recent snapshot found for **{selected_label}**. "
