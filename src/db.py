@@ -75,11 +75,28 @@ class PGConnection:
     """Wraps a psycopg2 connection to add sqlite3's `.execute()` shortcut."""
 
     def __init__(self, dsn):
+        import time
+
         import psycopg2
 
-        # Without a timeout, a network-level failure (blocked egress, wrong
-        # host) hangs here indefinitely instead of raising an error.
-        self._conn = psycopg2.connect(dsn, connect_timeout=15)
+        # Neon (and similar serverless Postgres) can be suspended after
+        # idleness; the connection that wakes it can fail once ("SSL
+        # connection has been closed unexpectedly") while the compute
+        # spins back up, then succeed moments later. Retry a few times
+        # before giving up. connect_timeout also avoids hanging forever
+        # on a genuinely unreachable host.
+        attempts = 3
+        delay = 2
+        last_error = None
+        for attempt in range(1, attempts + 1):
+            try:
+                self._conn = psycopg2.connect(dsn, connect_timeout=10)
+                return
+            except psycopg2.OperationalError as e:
+                last_error = e
+                if attempt < attempts:
+                    time.sleep(delay)
+        raise last_error
 
     def execute(self, sql, params=()):
         return PGCursor(self._conn.cursor()).execute(sql, params)
