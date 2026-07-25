@@ -7,14 +7,13 @@ dim_host (SCD2), and dim_listing (SCD2).
 import json
 import logging
 import os
-import sqlite3
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
-def load_dim_date(conn: sqlite3.Connection, snapshot_month: str) -> int:
+def load_dim_date(conn, snapshot_month: str) -> int:
     """Ensure a dim_date row exists for the given snapshot_month.
 
     Args:
@@ -43,7 +42,7 @@ def load_dim_date(conn: sqlite3.Connection, snapshot_month: str) -> int:
     return month_key
 
 
-def load_dim_city(conn: sqlite3.Connection, city_name: str) -> int:
+def load_dim_city(conn, city_name: str) -> int:
     """Ensure a dim_city row exists for the given city. Returns city_key."""
     row = conn.execute(
         "SELECT city_key FROM dim_city WHERE city_name = ?", (city_name,)
@@ -52,16 +51,16 @@ def load_dim_city(conn: sqlite3.Connection, city_name: str) -> int:
     if row:
         return row[0]
 
-    cur = conn.execute(
-        "INSERT INTO dim_city (city_name) VALUES (?)", (city_name,)
-    )
+    city_key = conn.execute(
+        "INSERT INTO dim_city (city_name) VALUES (?) RETURNING city_key", (city_name,)
+    ).fetchone()[0]
     conn.commit()
-    logger.info("Inserted dim_city: %s (city_key=%d)", city_name, cur.lastrowid)
-    return cur.lastrowid
+    logger.info("Inserted dim_city: %s (city_key=%d)", city_name, city_key)
+    return city_key
 
 
 def load_dim_neighbourhoods(
-    conn: sqlite3.Connection,
+    conn,
     city_key: int,
     stg_df: pd.DataFrame,
 ) -> dict:
@@ -97,18 +96,18 @@ def load_dim_neighbourhoods(
                     (row.get("neighbourhood_group_cleansed"), existing[0]),
                 )
         else:
-            cur = conn.execute(
+            new_key = conn.execute(
                 """INSERT INTO dim_neighbourhood
                    (city_key, neighbourhood, neighbourhood_cleansed, neighbourhood_group_cleansed)
-                   VALUES (?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?) RETURNING neighbourhood_key""",
                 (
                     city_key,
                     row.get("neighbourhood"),
                     nc,
                     row.get("neighbourhood_group_cleansed"),
                 ),
-            )
-            mapping[nc] = cur.lastrowid
+            ).fetchone()[0]
+            mapping[nc] = new_key
 
     conn.commit()
     logger.info("Loaded %d neighbourhoods for city_key=%d", len(mapping), city_key)
@@ -117,7 +116,7 @@ def load_dim_neighbourhoods(
 
 
 def load_neighbourhood_reference_files(
-    conn: sqlite3.Connection,
+    conn,
     city_key: int,
     city_dir: str,
 ) -> tuple[int, int]:
@@ -133,7 +132,7 @@ def load_neighbourhood_reference_files(
 
 
 def backfill_staging_neighbourhoods_from_dim_geo(
-    conn: sqlite3.Connection,
+    conn,
     city: str,
     snapshot_month: str,
     city_key: int,
@@ -184,7 +183,7 @@ def backfill_staging_neighbourhoods_from_dim_geo(
     return updated
 
 
-def _load_neighbourhoods_from_csv(conn: sqlite3.Connection, city_key: int, csv_path: str) -> int:
+def _load_neighbourhoods_from_csv(conn, city_key: int, csv_path: str) -> int:
     if not os.path.exists(csv_path):
         return 0
 
@@ -231,7 +230,7 @@ def _load_neighbourhoods_from_csv(conn: sqlite3.Connection, city_key: int, csv_p
     return count
 
 
-def _enrich_neighbourhoods_from_geojson(conn: sqlite3.Connection, city_key: int, geojson_path: str) -> int:
+def _enrich_neighbourhoods_from_geojson(conn, city_key: int, geojson_path: str) -> int:
     if not os.path.exists(geojson_path):
         return 0
 
@@ -336,7 +335,7 @@ def _clean_text(value):
     return val or None
 
 def load_dim_hosts(
-    conn: sqlite3.Connection,
+    conn,
     stg_df: pd.DataFrame,
     snapshot_month: str,
 ) -> dict:
@@ -393,11 +392,11 @@ def load_dim_hosts(
         # Insert new current record
         placeholders = ", ".join(["?"] * (len(available_cols) + 1))
         col_names = ", ".join(available_cols + ["valid_from"])
-        cur = conn.execute(
-            f"INSERT INTO dim_host ({col_names}) VALUES ({placeholders})",
+        new_key = conn.execute(
+            f"INSERT INTO dim_host ({col_names}) VALUES ({placeholders}) RETURNING host_key",
             [_safe_val(row.get(c)) for c in available_cols] + [snapshot_month],
-        )
-        mapping[hid] = cur.lastrowid
+        ).fetchone()[0]
+        mapping[hid] = new_key
 
     conn.commit()
     logger.info("Loaded %d hosts", len(mapping))
@@ -405,7 +404,7 @@ def load_dim_hosts(
 
 
 def load_dim_listings(
-    conn: sqlite3.Connection,
+    conn,
     stg_df: pd.DataFrame,
     snapshot_month: str,
 ) -> dict:
@@ -454,11 +453,11 @@ def load_dim_listings(
         placeholders = ", ".join(["?"] * len(db_cols))
         col_str = ", ".join(db_cols)
         vals = [lid] + [_safe_val(row.get(c)) for c in track_attrs] + [snapshot_month]
-        cur = conn.execute(
-            f"INSERT INTO dim_listing ({col_str}) VALUES ({placeholders})",
+        new_key = conn.execute(
+            f"INSERT INTO dim_listing ({col_str}) VALUES ({placeholders}) RETURNING listing_key",
             vals,
-        )
-        mapping[lid] = cur.lastrowid
+        ).fetchone()[0]
+        mapping[lid] = new_key
 
     conn.commit()
     logger.info("Loaded %d listings into dim_listing", len(mapping))

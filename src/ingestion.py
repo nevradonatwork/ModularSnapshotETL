@@ -6,11 +6,11 @@ them into the staging layer with cleansing and deduplication.
 """
 import logging
 import os
-import sqlite3
 from datetime import datetime, timezone
 
 import pandas as pd
 
+from src import db
 from src.validation import validate_file, validate_schema, geo_flag_out_of_city
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 
 def load_raw(
-    conn: sqlite3.Connection,
+    conn,
     file_path: str,
     city: str,
     snapshot_month: str,
@@ -41,7 +41,7 @@ def load_raw(
     df["pipeline_run_id"] = run_id
 
     # Write all columns that exist in the raw_listings table
-    raw_cols = _get_table_columns(conn, "raw_listings")
+    raw_cols = db.table_columns(conn, "raw_listings")
     # Exclude raw_id (auto-increment)
     raw_cols.discard("raw_id")
     cols_to_write = [c for c in df.columns if c in raw_cols]
@@ -54,7 +54,7 @@ def load_raw(
             len(unknown_cols), os.path.basename(file_path), ", ".join(unknown_cols),
         )
 
-    df[cols_to_write].to_sql("raw_listings", conn, if_exists="append", index=False)
+    db.bulk_insert(conn, "raw_listings", df[cols_to_write])
 
     row_count = len(df)
     logger.info("Loaded %d rows into raw_listings for %s/%s", row_count, city, snapshot_month)
@@ -62,7 +62,7 @@ def load_raw(
 
 
 def load_staging(
-    conn: sqlite3.Connection,
+    conn,
     city: str,
     snapshot_month: str,
 ) -> tuple[int, int, int]:
@@ -72,10 +72,10 @@ def load_staging(
         Tuple of (row count, rows excluded for invalid price, geo out-of-city count).
     """
     # Read raw data for this city/month
-    df = pd.read_sql_query(
-        "SELECT * FROM raw_listings WHERE city = ? AND snapshot_month = ?",
+    df = db.read_sql(
         conn,
-        params=(city, snapshot_month),
+        "SELECT * FROM raw_listings WHERE city = ? AND snapshot_month = ?",
+        (city, snapshot_month),
     )
     if df.empty:
         logger.warning("No raw data found for %s/%s", city, snapshot_month)
@@ -91,7 +91,7 @@ def load_staging(
     df["insert_date_utc"] = now
 
     # Map to staging columns
-    stg_cols = _get_table_columns(conn, "stg_listings")
+    stg_cols = db.table_columns(conn, "stg_listings")
     stg_cols.discard("stg_id")
     cols_to_write = [c for c in df.columns if c in stg_cols]
 
@@ -100,7 +100,7 @@ def load_staging(
         "DELETE FROM stg_listings WHERE city = ? AND snapshot_month = ?",
         (city, snapshot_month),
     )
-    df[cols_to_write].to_sql("stg_listings", conn, if_exists="append", index=False)
+    db.bulk_insert(conn, "stg_listings", df[cols_to_write])
     conn.commit()
 
     row_count = len(df)
@@ -197,12 +197,6 @@ def _parse_price(series: pd.Series) -> pd.Series:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
-
-def _get_table_columns(conn: sqlite3.Connection, table_name: str) -> set:
-    """Return the set of column names for a given table."""
-    cur = conn.execute(f"PRAGMA table_info({table_name})")
-    return {row[1] for row in cur.fetchall()}
-
 
 def archive_file(file_path: str, city: str, snapshot_month: str) -> str:
     """Move a processed file to an archive subdirectory.

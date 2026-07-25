@@ -10,10 +10,11 @@ Tables populated:
     rec_reporting_view_comparison     – fact table row counts vs reporting view row counts
 """
 import logging
-import sqlite3
 from datetime import datetime, timezone
 
 import pandas as pd
+
+from src import db
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def _safe_int(val):
 # ------------------------------------------------------------------
 
 def reconcile_avg_price(
-    conn: sqlite3.Connection,
+    conn,
     city_key: int,
     month_key: int,
 ) -> int:
@@ -102,9 +103,10 @@ def reconcile_avg_price(
 
 def _query_staging_avg_prices(conn, city_name, snapshot_month):
     """Calculate avg prices directly from staging, by room type and ALL."""
-    by_room = pd.read_sql_query(
+    by_room = db.read_sql(
+        conn,
         """SELECT dn.neighbourhood_key, dl.room_type,
-                  ROUND(AVG(s.price_amount), 2) AS avg_price, COUNT(*) AS listing_count
+                  ROUND(CAST(AVG(s.price_amount) AS NUMERIC), 2) AS avg_price, COUNT(*) AS listing_count
            FROM stg_listings s
            JOIN dim_city dc ON s.city = dc.city_name
            JOIN dim_neighbourhood dn
@@ -116,13 +118,13 @@ def _query_staging_avg_prices(conn, city_name, snapshot_month):
                  AND s.price_amount IS NOT NULL
                  AND dl.room_type IS NOT NULL
            GROUP BY dn.neighbourhood_key, dl.room_type""",
-        conn,
-        params=(city_name, snapshot_month),
+        (city_name, snapshot_month),
     )
 
-    all_rooms = pd.read_sql_query(
+    all_rooms = db.read_sql(
+        conn,
         """SELECT dn.neighbourhood_key, 'ALL' AS room_type,
-                  ROUND(AVG(s.price_amount), 2) AS avg_price, COUNT(*) AS listing_count
+                  ROUND(CAST(AVG(s.price_amount) AS NUMERIC), 2) AS avg_price, COUNT(*) AS listing_count
            FROM stg_listings s
            JOIN dim_city dc ON s.city = dc.city_name
            JOIN dim_neighbourhood dn
@@ -132,8 +134,7 @@ def _query_staging_avg_prices(conn, city_name, snapshot_month):
                  AND s.geo_out_of_city_flag = 0
                  AND s.price_amount IS NOT NULL
            GROUP BY dn.neighbourhood_key""",
-        conn,
-        params=(city_name, snapshot_month),
+        (city_name, snapshot_month),
     )
 
     return pd.concat([by_room, all_rooms], ignore_index=True)
@@ -141,12 +142,12 @@ def _query_staging_avg_prices(conn, city_name, snapshot_month):
 
 def _query_fact_avg_prices(conn, month_key, city_key):
     """Read existing fact avg prices."""
-    return pd.read_sql_query(
+    return db.read_sql(
+        conn,
         """SELECT neighbourhood_key, room_type, avg_price, listing_count
            FROM fct_neighbourhood_monthly_avg_price
            WHERE month_key = ? AND city_key = ?""",
-        conn,
-        params=(month_key, city_key),
+        (month_key, city_key),
     )
 
 
@@ -155,7 +156,7 @@ def _query_fact_avg_prices(conn, month_key, city_key):
 # ------------------------------------------------------------------
 
 def reconcile_top10_price_delta(
-    conn: sqlite3.Connection,
+    conn,
     city_key: int,
     month_key: int,
     n: int = 10,
@@ -167,32 +168,35 @@ def reconcile_top10_price_delta(
     """
     now = datetime.now(timezone.utc).isoformat()
 
-    stg_avgs = pd.read_sql_query(
+    stg_avgs = db.read_sql(
+        conn,
         """SELECT neighbourhood_key, room_type, stg_avg_price AS avg_price
            FROM rec_avg_price_comparison
            WHERE month_key = ? AND city_key = ? AND stg_avg_price IS NOT NULL""",
-        conn, params=(month_key, city_key),
+        (month_key, city_key),
     )
     if stg_avgs.empty:
         return 0
 
-    facts = pd.read_sql_query(
+    facts = db.read_sql(
+        conn,
         """SELECT f.neighbourhood_key, f.listing_key, f.price_amount, dl.room_type
            FROM fct_listing_monthly_snapshot f
            JOIN dim_listing dl ON f.listing_key = dl.listing_key
            WHERE f.month_key = ? AND f.city_key = ? AND f.price_amount IS NOT NULL""",
-        conn, params=(month_key, city_key),
+        (month_key, city_key),
     )
     if facts.empty:
         return 0
 
-    fct_top10 = pd.read_sql_query(
+    fct_top10 = db.read_sql(
+        conn,
         """SELECT neighbourhood_key, listing_key, room_type, delta_type,
                   price_amount, neighbourhood_avg_price, price_delta,
                   price_delta_pct, rank_in_neighbourhood
            FROM fct_neighbourhood_monthly_top10_price_delta
            WHERE month_key = ? AND city_key = ?""",
-        conn, params=(month_key, city_key),
+        (month_key, city_key),
     )
 
     conn.execute(
@@ -322,7 +326,7 @@ _VIEW_COMPARISONS = [
 
 
 def reconcile_reporting_views(
-    conn: sqlite3.Connection,
+    conn,
     city_key: int,
     month_key: int,
 ) -> int:

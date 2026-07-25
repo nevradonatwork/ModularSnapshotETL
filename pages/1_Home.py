@@ -8,8 +8,8 @@ import streamlit as st
 st.title("ModularSnapshotETL Data Platform")
 st.markdown(
     "A layered data engineering platform that transforms raw Airbnb-style "
-    "listing data into a SQLite analytical warehouse with dimensional "
-    "modelling, data quality controls, and BI-ready reporting views."
+    "listing data into a Postgres (Neon) analytical warehouse — SQLite locally — "
+    "with dimensional modelling, data quality controls, and BI-ready reporting views."
 )
 
 col_a, col_b, _ = st.columns([1, 1, 3])
@@ -93,7 +93,7 @@ with t1:
     | Component | Technology |
     |-----------|-----------|
     | Language | Python 3.11 |
-    | Database | SQLite (single-file, portable) |
+    | Database | Postgres (Neon) in production, SQLite locally |
     | Data Processing | Pandas |
     | Testing | pytest (70 tests) |
     | Scheduling | cron (2nd of each month) |

@@ -5,15 +5,16 @@ Loads the base fact (fct_listing_monthly_snapshot) and the aggregated
 facts (fct_neighbourhood_monthly_avg_price, fct_neighbourhood_monthly_top10_price_delta).
 """
 import logging
-import sqlite3
 
 import pandas as pd
+
+from src import db
 
 logger = logging.getLogger(__name__)
 
 
 def load_fct_listing_monthly_snapshot(
-    conn: sqlite3.Connection,
+    conn,
     city_key: int,
     month_key: int,
     neighbourhood_map: dict,
@@ -34,11 +35,11 @@ def load_fct_listing_monthly_snapshot(
     month = month_key % 100
     snapshot_month = f"{year}-{month:02d}-01"
 
-    stg = pd.read_sql_query(
+    stg = db.read_sql(
+        conn,
         """SELECT * FROM stg_listings
            WHERE city = ? AND snapshot_month = ? AND geo_out_of_city_flag = 0""",
-        conn,
-        params=(city_name, snapshot_month),
+        (city_name, snapshot_month),
     )
     if stg.empty:
         return 0
@@ -63,12 +64,23 @@ def load_fct_listing_monthly_snapshot(
             continue
 
         conn.execute(
-            """INSERT OR REPLACE INTO fct_listing_monthly_snapshot
+            """INSERT INTO fct_listing_monthly_snapshot
                (month_key, city_key, neighbourhood_key, listing_key, host_key,
                 price_amount, availability_30, availability_60, availability_90,
                 availability_365, number_of_reviews, reviews_per_month,
                 review_scores_rating)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (month_key, city_key, listing_key) DO UPDATE SET
+                   neighbourhood_key = excluded.neighbourhood_key,
+                   host_key = excluded.host_key,
+                   price_amount = excluded.price_amount,
+                   availability_30 = excluded.availability_30,
+                   availability_60 = excluded.availability_60,
+                   availability_90 = excluded.availability_90,
+                   availability_365 = excluded.availability_365,
+                   number_of_reviews = excluded.number_of_reviews,
+                   reviews_per_month = excluded.reviews_per_month,
+                   review_scores_rating = excluded.review_scores_rating""",
             (
                 month_key,
                 city_key,
@@ -96,7 +108,7 @@ def load_fct_listing_monthly_snapshot(
 
 
 def load_fct_neighbourhood_monthly_avg_price(
-    conn: sqlite3.Connection,
+    conn,
     city_key: int,
     month_key: int,
 ) -> int:
@@ -121,7 +133,7 @@ def load_fct_neighbourhood_monthly_avg_price(
                f.city_key,
                f.neighbourhood_key,
                dl.room_type,
-               ROUND(AVG(f.price_amount), 2),
+               ROUND(CAST(AVG(f.price_amount) AS NUMERIC), 2),
                COUNT(*)
            FROM fct_listing_monthly_snapshot f
            JOIN dim_listing dl ON f.listing_key = dl.listing_key
@@ -141,7 +153,7 @@ def load_fct_neighbourhood_monthly_avg_price(
                city_key,
                neighbourhood_key,
                'ALL',
-               ROUND(AVG(price_amount), 2),
+               ROUND(CAST(AVG(price_amount) AS NUMERIC), 2),
                COUNT(*)
            FROM fct_listing_monthly_snapshot
            WHERE month_key = ? AND city_key = ? AND price_amount IS NOT NULL
@@ -158,7 +170,7 @@ def load_fct_neighbourhood_monthly_avg_price(
 
 
 def load_fct_neighbourhood_monthly_top10_price_delta(
-    conn: sqlite3.Connection,
+    conn,
     city_key: int,
     month_key: int,
     n: int = 10,
@@ -175,25 +187,25 @@ def load_fct_neighbourhood_monthly_top10_price_delta(
     )
 
     # Get neighbourhood averages (both per room_type and ALL)
-    avgs = pd.read_sql_query(
+    avgs = db.read_sql(
+        conn,
         """SELECT neighbourhood_key, room_type, avg_price
            FROM fct_neighbourhood_monthly_avg_price
            WHERE month_key = ? AND city_key = ?""",
-        conn,
-        params=(month_key, city_key),
+        (month_key, city_key),
     )
     if avgs.empty:
         return 0
 
     # Get all listings for this month/city with their room_type
-    facts = pd.read_sql_query(
+    facts = db.read_sql(
+        conn,
         """SELECT f.neighbourhood_key, f.listing_key, f.price_amount,
                   dl.room_type
            FROM fct_listing_monthly_snapshot f
            JOIN dim_listing dl ON f.listing_key = dl.listing_key
            WHERE f.month_key = ? AND f.city_key = ? AND f.price_amount IS NOT NULL""",
-        conn,
-        params=(month_key, city_key),
+        (month_key, city_key),
     )
     if facts.empty:
         return 0
@@ -260,7 +272,7 @@ def load_fct_neighbourhood_monthly_top10_price_delta(
 
 
 def load_fct_data_compliance_monthly(
-    conn: sqlite3.Connection,
+    conn,
     city_key: int,
     month_key: int,
 ) -> int:
@@ -278,12 +290,12 @@ def load_fct_data_compliance_monthly(
     month = month_key % 100
     snapshot_month = f"{year}-{month:02d}-01"
 
-    stg = pd.read_sql_query(
+    stg = db.read_sql(
+        conn,
         """SELECT price_amount, neighbourhood_cleansed, room_type
            FROM stg_listings
            WHERE city = ? AND snapshot_month = ? AND geo_out_of_city_flag = 0""",
-        conn,
-        params=(city_name, snapshot_month),
+        (city_name, snapshot_month),
     )
 
     conn.execute(
