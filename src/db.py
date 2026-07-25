@@ -77,7 +77,9 @@ class PGConnection:
     def __init__(self, dsn):
         import psycopg2
 
-        self._conn = psycopg2.connect(dsn)
+        # Without a timeout, a network-level failure (blocked egress, wrong
+        # host) hangs here indefinitely instead of raising an error.
+        self._conn = psycopg2.connect(dsn, connect_timeout=15)
 
     def execute(self, sql, params=()):
         return PGCursor(self._conn.cursor()).execute(sql, params)
