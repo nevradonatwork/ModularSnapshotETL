@@ -13,11 +13,8 @@ Execution flow:
 """
 import logging
 import os
-import sqlite3
 
-import pandas as pd
-
-from src import etl_logging
+from src import db, etl_logging
 from src.ingestion import load_raw, load_staging, derive_snapshot_month, archive_file
 from src.dimensions import (
     load_dim_date,
@@ -45,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 def run(
-    conn: sqlite3.Connection,
+    conn,
     dataset_path: str,
     city: str,
     triggered_by: str | None = None,
@@ -127,10 +124,10 @@ def run(
         row_counts["stg_neighbourhood_geo_backfilled"] = backfilled_count
 
         # Step 6b: Read staging data for validation + dimension loading
-        stg_df = pd.read_sql_query(
-            "SELECT * FROM stg_listings WHERE city = ? AND snapshot_month = ?",
+        stg_df = db.read_sql(
             conn,
-            params=(city, snapshot_month),
+            "SELECT * FROM stg_listings WHERE city = ? AND snapshot_month = ?",
+            (city, snapshot_month),
         )
 
         warnings = validate_data_quality(stg_df)
@@ -182,6 +179,9 @@ def run(
         return row_counts
 
     except Exception as e:
+        # Roll back the failed statement's transaction first — on Postgres,
+        # a connection stays unusable for further writes until this happens.
+        conn.rollback()
         etl_logging.log_error(conn, run_id, type(e).__name__, str(e))
         etl_logging.finish_run(conn, run_id, "FAILED", row_counts, str(e))
         raise

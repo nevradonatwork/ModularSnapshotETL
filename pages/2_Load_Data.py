@@ -16,7 +16,21 @@ if _project_root not in sys.path:
 
 from dashboard.constants import DATASET_DIR, LISTING_FILENAME, DB_PATH, CITY_OPTIONS
 from dashboard.pipeline_runner import run_with_progress
+from src import db, etl_logging
+from src.schema import create_all
 from src.validation import REQUIRED_COLUMNS
+
+
+def _log_user_error(city_slug: str, message: str) -> None:
+    """Record a pre-pipeline user-facing failure (bad city, download, schema)
+    in etl_run_log/etl_error_log, so it shows up in Run History alongside
+    pipeline runs."""
+    conn = db.get_connection(DB_PATH)
+    create_all(conn)
+    run_id = etl_logging.start_run(conn, city=city_slug, triggered_by="dashboard")
+    etl_logging.log_error(conn, run_id, "USER_ERROR", message)
+    etl_logging.finish_run(conn, run_id, "FAILED", error_message=message)
+    conn.close()
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -111,10 +125,12 @@ if st.button("Ingest & Run Pipeline", disabled=run_disabled, type="primary"):
             if snapshot is None:
                 snapshot = probe_catalog_city(city_slug)
             if snapshot is None:
-                st.error(
-                    f"No recent snapshot found for **{selected_label}**. "
+                msg = (
+                    f"No recent snapshot found for {selected_label}. "
                     "This city may be temporarily unavailable on Inside Airbnb."
                 )
+                st.error(msg)
+                _log_user_error(city_slug, msg)
                 st.stop()
 
             st.write(f"Found snapshot: **{snapshot.snapshot_date}**")
@@ -138,11 +154,15 @@ if st.button("Ingest & Run Pipeline", disabled=run_disabled, type="primary"):
         if "listings" in downloaded:
             target_path = downloaded["listings"]
         else:
-            st.error("listings.csv.gz was not downloaded.")
+            msg = "listings.csv.gz was not downloaded."
+            st.error(msg)
+            _log_user_error(city_slug, msg)
             st.stop()
 
     except Exception as e:
-        st.error(f"Failed to download data: {e}")
+        msg = f"Failed to download data: {e}"
+        st.error(msg)
+        _log_user_error(city_slug, msg)
         st.stop()
 
     # --- Pre-flight validation ---
@@ -150,11 +170,15 @@ if st.button("Ingest & Run Pipeline", disabled=run_disabled, type="primary"):
         preview = pd.read_csv(target_path, nrows=5, compression="gzip")
         missing = set(REQUIRED_COLUMNS) - set(preview.columns)
         if missing:
-            st.error(f"Missing required columns: {missing}")
+            msg = f"Missing required columns: {missing}"
+            st.error(msg)
+            _log_user_error(city_slug, msg)
             st.stop()
         st.success(f"Schema check passed. Columns found: {len(preview.columns)}")
     except Exception as e:
-        st.error(f"Cannot read file: {e}")
+        msg = f"Cannot read file: {e}"
+        st.error(msg)
+        _log_user_error(city_slug, msg)
         st.stop()
 
     # --- Run pipeline ---
@@ -192,78 +216,75 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.header("Run History")
 
-if os.path.exists(DB_PATH):
-    try:
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+try:
+    conn = db.get_connection(DB_PATH)
+    create_all(conn)
 
-        runs = pd.read_sql(
-            """
-            SELECT run_id, start_time, end_time, status, city, snapshot_month,
-                   source_file_name, archived_file_path, row_counts,
-                   error_message, triggered_by
-            FROM etl_run_log
-            ORDER BY start_time DESC
-            LIMIT 20
-            """,
-            conn,
+    runs = db.read_sql(
+        conn,
+        """
+        SELECT run_id, start_time, end_time, status, city, snapshot_month,
+               source_file_name, archived_file_path, row_counts,
+               error_message, triggered_by
+        FROM etl_run_log
+        ORDER BY start_time DESC
+        LIMIT 20
+        """,
+    )
+    if runs.empty:
+        st.info("No pipeline runs recorded yet.")
+    else:
+        # Show summary table with key columns
+        display_cols = ["run_id", "start_time", "status", "city", "snapshot_month", "triggered_by"]
+        st.dataframe(
+            runs[[c for c in display_cols if c in runs.columns]],
+            use_container_width=True,
+            hide_index=True,
         )
-        if runs.empty:
-            st.info("No pipeline runs recorded yet.")
-        else:
-            # Show summary table with key columns
-            display_cols = ["run_id", "start_time", "status", "city", "snapshot_month", "triggered_by"]
-            st.dataframe(
-                runs[[c for c in display_cols if c in runs.columns]],
-                use_container_width=True,
-                hide_index=True,
-            )
 
-            selected_run = st.selectbox(
-                "Select a run to view details",
-                runs["run_id"].tolist(),
-                format_func=lambda rid: f"Run #{rid} — {runs.loc[runs['run_id'] == rid, 'city'].values[0]} ({runs.loc[runs['run_id'] == rid, 'status'].values[0]})",
-            )
+        selected_run = st.selectbox(
+            "Select a run to view details",
+            runs["run_id"].tolist(),
+            format_func=lambda rid: f"Run #{rid} — {runs.loc[runs['run_id'] == rid, 'city'].values[0]} ({runs.loc[runs['run_id'] == rid, 'status'].values[0]})",
+        )
 
-            if selected_run:
-                run_row = runs[runs["run_id"] == selected_run].iloc[0]
-                with st.expander("Run Details", expanded=True):
-                    st.markdown(f"**Status:** {run_row['status']}")
-                    st.markdown(f"**City:** {run_row['city']}")
-                    st.markdown(f"**Snapshot Month:** {run_row['snapshot_month']}")
-                    st.markdown(f"**Start:** {run_row['start_time']}")
-                    st.markdown(f"**End:** {run_row['end_time']}")
+        if selected_run:
+            run_row = runs[runs["run_id"] == selected_run].iloc[0]
+            with st.expander("Run Details", expanded=True):
+                st.markdown(f"**Status:** {run_row['status']}")
+                st.markdown(f"**City:** {run_row['city']}")
+                st.markdown(f"**Snapshot Month:** {run_row['snapshot_month']}")
+                st.markdown(f"**Start:** {run_row['start_time']}")
+                st.markdown(f"**End:** {run_row['end_time']}")
 
-                    triggered = run_row.get("triggered_by", "")
-                    st.markdown(f"**Triggered By:** `{triggered or 'cli'}`")
+                triggered = run_row.get("triggered_by", "")
+                st.markdown(f"**Triggered By:** `{triggered or 'cli'}`")
 
-                    if run_row["archived_file_path"]:
-                        st.markdown(f"**Archived File:** `{run_row['archived_file_path']}`")
+                if run_row["archived_file_path"]:
+                    st.markdown(f"**Archived File:** `{run_row['archived_file_path']}`")
 
-                    if run_row["row_counts"]:
-                        try:
-                            rc = json.loads(run_row["row_counts"])
-                            st.markdown("**Row Counts:**")
-                            st.json(rc)
-                        except (json.JSONDecodeError, TypeError):
-                            st.text(run_row["row_counts"])
+                if run_row["row_counts"]:
+                    try:
+                        rc = json.loads(run_row["row_counts"])
+                        st.markdown("**Row Counts:**")
+                        st.json(rc)
+                    except (json.JSONDecodeError, TypeError):
+                        st.text(run_row["row_counts"])
 
-                    if run_row["error_message"]:
-                        st.error(f"Error: {run_row['error_message']}")
+                if run_row["error_message"]:
+                    st.error(f"Error: {run_row['error_message']}")
 
-                    # Show error log entries
-                    errors = pd.read_sql(
-                        "SELECT table_name, error_type, error_details, timestamp "
-                        "FROM etl_error_log WHERE run_id = ? ORDER BY timestamp",
-                        conn,
-                        params=(int(selected_run),),
-                    )
-                    if not errors.empty:
-                        st.markdown("**Error / Warning Log:**")
-                        st.dataframe(errors, use_container_width=True, hide_index=True)
+                # Show error log entries
+                errors = db.read_sql(
+                    conn,
+                    "SELECT table_name, error_type, error_details, timestamp "
+                    "FROM etl_error_log WHERE run_id = ? ORDER BY timestamp",
+                    (int(selected_run),),
+                )
+                if not errors.empty:
+                    st.markdown("**Error / Warning Log:**")
+                    st.dataframe(errors, use_container_width=True, hide_index=True)
 
-        conn.close()
-    except Exception as e:
-        st.warning(f"Could not load run history: {e}")
-else:
-    st.info("No database found. Load data to create one.")
+    conn.close()
+except Exception as e:
+    st.warning(f"Could not load run history: {e}")

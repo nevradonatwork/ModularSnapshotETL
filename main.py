@@ -13,28 +13,12 @@ tables: raw, staging, dimensions, facts, and reporting views.
 """
 import logging
 import os
-import sqlite3
 import sys
 
+from src import db
 from src.schema import create_all
 from src.pipeline import run
 from src.email_notify import send_run_notification
-
-def _load_dotenv(path=".env"):
-    """Load key=value pairs from a .env file into os.environ."""
-    if not os.path.isfile(path):
-        return
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            key, _, value = line.partition("=")
-            if key and _ == "=":
-                os.environ.setdefault(key.strip(), value.strip())
-
-
-_load_dotenv()
 
 DATASET_DIR = "dataset"
 LISTING_FILENAME = "listings.csv.gz"
@@ -54,11 +38,8 @@ def discover_cities(dataset_dir):
 
 
 def get_connection(db_path=DATABASE_PATH):
-    """Create a SQLite connection with foreign keys enabled."""
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    """Return a Postgres connection if DATABASE_URL is configured, else local SQLite."""
+    return db.get_connection(db_path)
 
 
 def main():

@@ -1,41 +1,35 @@
 """Database connection helpers for the Streamlit dashboard."""
 
-import os
-import sqlite3
-
 import pandas as pd
 import streamlit as st
 
 from dashboard.constants import DB_PATH
+from src import db
 
 
 @st.cache_resource
-def get_connection() -> sqlite3.Connection:
-    """Return a shared SQLite connection (cached across reruns)."""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+def get_connection():
+    """Return a shared database connection (cached across reruns).
+
+    Uses Postgres (Neon) when DATABASE_URL is configured, else a local
+    SQLite file — see src/db.py.
+    """
+    return db.get_connection(DB_PATH)
 
 
-def get_fresh_connection() -> sqlite3.Connection:
-    """Return a new (uncached) SQLite connection — used after pipeline writes."""
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+def get_fresh_connection():
+    """Return a new (uncached) connection — used after pipeline writes."""
+    return db.get_connection(DB_PATH)
 
 
 def query_df(sql: str, params: tuple | dict | None = None) -> pd.DataFrame:
     """Run a read-only SQL query and return a DataFrame."""
     conn = get_connection()
-    return pd.read_sql(sql, conn, params=params or ())
+    return db.read_sql(conn, sql, params)
 
 
 def db_has_data() -> bool:
-    """Check if the database file exists and contains fact rows."""
-    if not os.path.exists(DB_PATH):
-        return False
+    """Check if the database contains any fact rows."""
     try:
         conn = get_connection()
         row = conn.execute(

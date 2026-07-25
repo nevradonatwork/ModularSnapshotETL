@@ -10,13 +10,20 @@ Layers:
     rec_     – reconciliation / data comparison
     etl_     – pipeline logging and error tracking
 """
-import sqlite3
+from src.db import is_postgres
+
+# SQLite uses "INTEGER PRIMARY KEY AUTOINCREMENT" for auto-increment PKs;
+# Postgres uses "SERIAL PRIMARY KEY". Every CREATE TABLE below is written
+# with the SQLite spelling and adapted for Postgres in _exec_ddl().
+_SQLITE_PK = "INTEGER PRIMARY KEY AUTOINCREMENT"
+_POSTGRES_PK = "SERIAL PRIMARY KEY"
 
 
-def create_all(conn: sqlite3.Connection) -> None:
+def create_all(conn) -> None:
     """Create every table, index, and view in the ModularSnapshotETL database."""
-    cur = conn.cursor()
-    _create_etl_tables(cur)
+    postgres = is_postgres(conn)
+    cur = _DDLCursor(conn.cursor(), postgres)
+    _create_etl_tables(cur, postgres)
     _create_raw_tables(cur)
     _create_staging_tables(cur)
     _create_dimension_tables(cur)
@@ -26,11 +33,28 @@ def create_all(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+class _DDLCursor:
+    """Wraps a cursor so every statement is adapted for the target dialect."""
+
+    def __init__(self, cur, postgres: bool):
+        self._cur = cur
+        self._postgres = postgres
+
+    def execute(self, sql, params=()):
+        if self._postgres:
+            sql = sql.replace(_SQLITE_PK, _POSTGRES_PK)
+        self._cur.execute(sql, params)
+        return self
+
+    def fetchall(self):
+        return self._cur.fetchall()
+
+
 # ------------------------------------------------------------------
 # ETL Logging
 # ------------------------------------------------------------------
 
-def _create_etl_tables(cur: sqlite3.Cursor) -> None:
+def _create_etl_tables(cur, postgres: bool) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS etl_run_log (
             run_id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,9 +73,12 @@ def _create_etl_tables(cur: sqlite3.Cursor) -> None:
     """)
 
     # Migrate existing databases: add triggered_by column if missing
-    existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(etl_run_log)").fetchall()}
-    if "triggered_by" not in existing_cols:
-        cur.execute("ALTER TABLE etl_run_log ADD COLUMN triggered_by TEXT")
+    if postgres:
+        cur.execute("ALTER TABLE etl_run_log ADD COLUMN IF NOT EXISTS triggered_by TEXT")
+    else:
+        existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(etl_run_log)").fetchall()}
+        if "triggered_by" not in existing_cols:
+            cur.execute("ALTER TABLE etl_run_log ADD COLUMN triggered_by TEXT")
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS etl_error_log (
@@ -70,7 +97,7 @@ def _create_etl_tables(cur: sqlite3.Cursor) -> None:
 # Raw Layer
 # ------------------------------------------------------------------
 
-def _create_raw_tables(cur: sqlite3.Cursor) -> None:
+def _create_raw_tables(cur) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS raw_listings (
             raw_id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,7 +195,7 @@ def _create_raw_tables(cur: sqlite3.Cursor) -> None:
 # Staging Layer
 # ------------------------------------------------------------------
 
-def _create_staging_tables(cur: sqlite3.Cursor) -> None:
+def _create_staging_tables(cur) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS stg_listings (
             stg_id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -242,7 +269,7 @@ def _create_staging_tables(cur: sqlite3.Cursor) -> None:
 # Dimension Layer
 # ------------------------------------------------------------------
 
-def _create_dimension_tables(cur: sqlite3.Cursor) -> None:
+def _create_dimension_tables(cur) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS dim_date (
             date_key        INTEGER PRIMARY KEY,
@@ -334,7 +361,7 @@ def _create_dimension_tables(cur: sqlite3.Cursor) -> None:
 # Fact Layer
 # ------------------------------------------------------------------
 
-def _create_fact_tables(cur: sqlite3.Cursor) -> None:
+def _create_fact_tables(cur) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS fct_listing_monthly_snapshot (
             snapshot_id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -419,7 +446,7 @@ def _create_fact_tables(cur: sqlite3.Cursor) -> None:
 # Presentation Layer (Views)
 # ------------------------------------------------------------------
 
-def _create_presentation_views(cur: sqlite3.Cursor) -> None:
+def _create_presentation_views(cur) -> None:
     cur.execute("DROP VIEW IF EXISTS vw_rep_monthly_neighbourhood_avg_price")
     cur.execute("""
         CREATE VIEW vw_rep_monthly_neighbourhood_avg_price AS
@@ -517,7 +544,7 @@ def _create_presentation_views(cur: sqlite3.Cursor) -> None:
 # Reconciliation Layer (data comparison / audit)
 # ------------------------------------------------------------------
 
-def _create_reconciliation_tables(cur: sqlite3.Cursor) -> None:
+def _create_reconciliation_tables(cur) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS rec_avg_price_comparison (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
