@@ -1,0 +1,15 @@
+name: Keep Streamlit App Awake
+
+on:
+  schedule:
+    # Every 6 hours - well under Streamlit Community Cloud's inactivity
+    # sleep threshold, so the app never gets marked as unused.
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the app
+        run: curl -sSf --retry 3 --retry-delay 10 "https://modularsnapshotetl.streamlit.app/" -o /dev/null
