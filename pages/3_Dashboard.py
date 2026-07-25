@@ -23,7 +23,13 @@ st.title("Dashboard")
 # ---------------------------------------------------------------------------
 # Pre-requisite check
 # ---------------------------------------------------------------------------
-if not db_has_data():
+try:
+    has_data = db_has_data()
+except Exception as e:
+    st.error(f"Could not connect to the database: {e}")
+    st.stop()
+
+if not has_data:
     st.warning("No data loaded yet. Go to **Load Data** to ingest a dataset first.")
     if st.button("Go to Load Data"):
         st.switch_page("pages/2_Load_Data.py")
