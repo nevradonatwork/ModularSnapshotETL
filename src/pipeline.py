@@ -14,7 +14,9 @@ Execution flow:
 import logging
 import os
 
-from src import db, etl_logging
+import pandas as pd
+
+from src import audit, db, etl_logging
 from src.ingestion import load_raw, load_staging, derive_snapshot_month, archive_file
 from src.dimensions import (
     load_dim_date,
@@ -82,6 +84,18 @@ def run(
         raw_count = load_raw(conn, dataset_path, city, snapshot_month, run_id)
         row_counts["raw_listings"] = raw_count
 
+        # Audit: source file rows -> raw_listings
+        source_ids = pd.read_csv(dataset_path, usecols=["id"])["id"]
+        audit.log_row_count_check(
+            conn, run_id, "raw_listings",
+            source_count=len(source_ids),
+            target_count=raw_count,
+            checksum_source=audit.checksum_from_series(source_ids),
+            checksum_target=audit.compute_checksum(
+                conn, "SELECT id FROM raw_listings WHERE pipeline_run_id = ?", (run_id,)
+            ),
+        )
+
         # Step 4: Archive source file after successful raw ingestion
         archived_path = archive_file(dataset_path, city, snapshot_month)
         etl_logging.update_archived_path(conn, run_id, archived_path)
@@ -93,6 +107,28 @@ def run(
         row_counts["stg_listings"] = stg_count
         row_counts["invalid_price_excluded"] = invalid_price_count
         row_counts["geo_out_of_city_count"] = geo_flagged_count
+
+        # Audit: raw_listings -> stg_listings (both scoped to city/month;
+        # counts commonly differ by design -- staging dedupes reruns and
+        # drops invalid-price rows, so this records the delta rather than
+        # asserting equality)
+        raw_count_for_month = db.read_sql(
+            conn, "SELECT COUNT(*) AS c FROM raw_listings WHERE city = ? AND snapshot_month = ?",
+            (city, snapshot_month),
+        )["c"][0]
+        audit.log_row_count_check(
+            conn, run_id, "stg_listings",
+            source_count=int(raw_count_for_month),
+            target_count=stg_count,
+            checksum_source=audit.compute_checksum(
+                conn, "SELECT DISTINCT id FROM raw_listings WHERE city = ? AND snapshot_month = ?",
+                (city, snapshot_month),
+            ),
+            checksum_target=audit.compute_checksum(
+                conn, "SELECT id FROM stg_listings WHERE city = ? AND snapshot_month = ?",
+                (city, snapshot_month),
+            ),
+        )
 
         if invalid_price_count > 0:
             etl_logging.log_error(
@@ -151,6 +187,39 @@ def run(
             conn, city_key, month_key, neighbourhood_map, listing_map, host_map
         )
         row_counts["fct_listing_monthly_snapshot"] = fct_count
+
+        # Audit: stg_listings (geo-valid) -> fct_listing_monthly_snapshot.
+        # Only this fact table is checked here -- the others are aggregates
+        # (avg price, top-10, compliance) whose row counts never match their
+        # source by design, and are already validated by the deeper
+        # business-rule checks in reconciliation.py (Step 9 below).
+        geo_valid_count = db.read_sql(
+            conn,
+            """SELECT COUNT(*) AS c FROM stg_listings
+               WHERE city = ? AND snapshot_month = ? AND geo_out_of_city_flag = 0""",
+            (city, snapshot_month),
+        )["c"][0]
+        audit.log_row_count_check(
+            conn, run_id, "fct_listing_monthly_snapshot",
+            source_count=int(geo_valid_count),
+            target_count=fct_count,
+            checksum_source=audit.compute_checksum(
+                conn,
+                """SELECT id FROM stg_listings
+                   WHERE city = ? AND snapshot_month = ? AND geo_out_of_city_flag = 0""",
+                (city, snapshot_month),
+            ),
+            checksum_target=audit.compute_checksum(
+                conn,
+                """SELECT dl.listing_id FROM fct_listing_monthly_snapshot f
+                   JOIN dim_listing dl ON f.listing_key = dl.listing_key
+                   WHERE f.month_key = ? AND f.city_key = ?""",
+                (month_key, city_key),
+            ),
+        )
+        audit.update_watermark(conn, "raw_listings", run_id)
+        audit.update_watermark(conn, "stg_listings", run_id)
+        audit.update_watermark(conn, "fct_listing_monthly_snapshot", run_id)
 
         avg_count = load_fct_neighbourhood_monthly_avg_price(conn, city_key, month_key)
         row_counts["fct_neighbourhood_monthly_avg_price"] = avg_count

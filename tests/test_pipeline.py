@@ -87,3 +87,27 @@ class TestPipeline:
         row_counts = run(db_conn, sample_csv, "new-york")
         assert "geo_out_of_city_count" in row_counts
         assert row_counts["geo_out_of_city_count"] == 0
+
+    def test_row_count_reconciliation_logged(self, db_conn, sample_csv):
+        run(db_conn, sample_csv, "new-york")
+
+        rows = db_conn.execute(
+            "SELECT table_name, match_status FROM row_count_reconciliation ORDER BY id"
+        ).fetchall()
+        table_names = {r[0] for r in rows}
+        assert {"raw_listings", "stg_listings", "fct_listing_monthly_snapshot"} <= table_names
+        # raw_listings: whole file loaded 1:1, so this checkpoint must match
+        raw_check = [r for r in rows if r[0] == "raw_listings"][0]
+        assert raw_check[1] == "matched"
+
+    def test_watermark_control_updated(self, db_conn, sample_csv):
+        run(db_conn, sample_csv, "new-york")
+
+        rows = db_conn.execute(
+            "SELECT table_name, last_run_id FROM watermark_control ORDER BY table_name"
+        ).fetchall()
+        watermarked = {r[0]: r[1] for r in rows}
+        assert "raw_listings" in watermarked
+        assert "stg_listings" in watermarked
+        assert "fct_listing_monthly_snapshot" in watermarked
+        assert all(run_id is not None for run_id in watermarked.values())
