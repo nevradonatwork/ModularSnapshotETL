@@ -101,16 +101,16 @@ def _create_raw_tables(cur) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS raw_listings (
             raw_id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            id                  INTEGER,
+            id                  BIGINT,
             listing_url         TEXT,
-            scrape_id           INTEGER,
+            scrape_id           BIGINT,
             last_scraped        TEXT,
             source              TEXT,
             name                TEXT,
             description         TEXT,
             neighborhood_overview TEXT,
             picture_url         TEXT,
-            host_id             INTEGER,
+            host_id             BIGINT,
             host_url            TEXT,
             host_name           TEXT,
             host_since          TEXT,
@@ -199,12 +199,12 @@ def _create_staging_tables(cur) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS stg_listings (
             stg_id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            id                  INTEGER NOT NULL,
+            id                  BIGINT NOT NULL,
             city                TEXT NOT NULL,
             snapshot_month      TEXT NOT NULL,
             name                TEXT,
             description         TEXT,
-            host_id             INTEGER,
+            host_id             BIGINT,
             host_name           TEXT,
             host_since          TEXT,
             host_location       TEXT,
@@ -309,7 +309,7 @@ def _create_dimension_tables(cur) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS dim_host (
             host_key                INTEGER PRIMARY KEY AUTOINCREMENT,
-            host_id                 INTEGER NOT NULL,
+            host_id                 BIGINT NOT NULL,
             host_name               TEXT,
             host_since              TEXT,
             host_location           TEXT,
@@ -336,7 +336,7 @@ def _create_dimension_tables(cur) -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS dim_listing (
             listing_key     INTEGER PRIMARY KEY AUTOINCREMENT,
-            listing_id      INTEGER NOT NULL,
+            listing_id      BIGINT NOT NULL,
             property_type   TEXT,
             room_type       TEXT,
             accommodates    INTEGER,
