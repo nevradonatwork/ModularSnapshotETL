@@ -68,7 +68,7 @@ with p1:
     st.markdown("**Idempotent Reruns**")
     st.caption("Safe to rerun any city/month — staging and facts are scoped-delete + insert.")
     st.markdown("**ETL Run Logging**")
-    st.caption("Every run tracked in etl_run_log with timestamps, row counts, and error messages.")
+    st.caption("Every run tracked in pipeline_execution_log with timestamps, row counts, and error messages.")
 with p2:
     st.markdown("**File Archiving**")
     st.caption("Processed files archived with timestamp for full traceability and reprocessing.")

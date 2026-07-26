@@ -73,7 +73,7 @@ def run(
         snapshot_month = derive_snapshot_month(dataset_path)
         logger.info("Snapshot month: %s", snapshot_month)
         conn.execute(
-            "UPDATE etl_run_log SET snapshot_month = ? WHERE run_id = ?",
+            "UPDATE pipeline_execution_log SET snapshot_month = ? WHERE run_id = ?",
             (snapshot_month, run_id),
         )
         conn.commit()

@@ -45,11 +45,11 @@ COLUMN_DICTIONARY = [
     {"column": "geo_out_of_city_flag", "description": "Whether listing coords are outside city bounds", "layers": "stg", "type": "INTEGER", "validation": "0 = inside, 1 = outside or missing coords", "notes": "Flagged rows excluded from fact layer"},
     # --- ETL Tracking ---
     {"column": "insert_date_utc", "description": "UTC timestamp when row was inserted", "layers": "raw, stg", "type": "TEXT", "validation": "Auto-set on insert", "notes": "ISO 8601 format"},
-    {"column": "pipeline_run_id", "description": "ETL run that created this row", "layers": "raw", "type": "INTEGER", "validation": "FK to etl_run_log", "notes": "Traceability link"},
+    {"column": "pipeline_run_id", "description": "ETL run that created this row", "layers": "raw", "type": "INTEGER", "validation": "FK to pipeline_execution_log", "notes": "Traceability link"},
 ]
 
 QUALITY_RULES = [
-    {"rule": "Price > 0", "implementation": "Staging _clean() filters null/zero prices", "outcome": "Excluded from staging; count logged to etl_error_log"},
+    {"rule": "Price > 0", "implementation": "Staging _clean() filters null/zero prices", "outcome": "Excluded from staging; count logged to pipeline_error_log"},
     {"rule": "Availability 0-365", "implementation": "validate_data_quality() range check", "outcome": "Warning logged, row kept"},
     {"rule": "Duplicate deduplication", "implementation": "_deduplicate() by (city, snapshot_month, id), keep latest last_scraped", "outcome": "Duplicates removed in staging"},
     {"rule": "Geo bounding box", "implementation": "geo_flag_out_of_city() using CITY_BOUNDARIES", "outcome": "Flagged in staging (geo_out_of_city_flag=1), excluded from facts"},

@@ -1,41 +1,86 @@
 """
 Database schema for the ModularSnapshotETL data platform.
 
-Layers:
-    raw_     – immutable landing storage
-    stg_     – cleansing and deduplication
-    dim_     – conformed dimensions
-    fct_     – analytical fact tables
-    vw_rep_  – reporting views for BI
-    rec_     – reconciliation / data comparison
-    etl_     – pipeline logging and error tracking
+Medallion architecture (Postgres schemas; SQLite has no schema separation
+and keeps every table in one flat namespace — see _q() below):
+    bronze    – raw_, immutable landing storage
+    silver    – stg_, cleansing and deduplication
+    gold      – dim_/fct_/vw_rep_, conformed dimensions, facts, reporting views
+    metadata  – pipeline execution/error logs, row-count reconciliation,
+                watermark control, visitor log, and the business-rule
+                reconciliation (rec_) tables
 """
 from src.db import is_postgres
 
 # SQLite uses "INTEGER PRIMARY KEY AUTOINCREMENT" for auto-increment PKs;
 # Postgres uses "SERIAL PRIMARY KEY". Every CREATE TABLE below is written
-# with the SQLite spelling and adapted for Postgres in _exec_ddl().
+# with the SQLite spelling and adapted for Postgres in _DDLCursor.execute().
 _SQLITE_PK = "INTEGER PRIMARY KEY AUTOINCREMENT"
 _POSTGRES_PK = "SERIAL PRIMARY KEY"
 
+# Every table/view name is globally unique across schemas, so on Postgres
+# a connection's `search_path` (set once in db.PGConnection.__init__) lets
+# every *unqualified* reference elsewhere in the codebase — SELECT/INSERT/
+# UPDATE/DELETE, view bodies, FOREIGN KEY REFERENCES — resolve correctly
+# without any per-call-site changes. Only the DDL below, which actually
+# creates each object, needs to say which schema it belongs in.
+_SCHEMA_OF = {
+    "pipeline_execution_log": "metadata",
+    "pipeline_error_log": "metadata",
+    "row_count_reconciliation": "metadata",
+    "watermark_control": "metadata",
+    "visitor_log": "metadata",
+    "raw_listings": "bronze",
+    "stg_listings": "silver",
+    "dim_date": "gold",
+    "dim_city": "gold",
+    "dim_neighbourhood": "gold",
+    "dim_host": "gold",
+    "dim_listing": "gold",
+    "fct_listing_monthly_snapshot": "gold",
+    "fct_neighbourhood_monthly_avg_price": "gold",
+    "fct_neighbourhood_monthly_top10_price_delta": "gold",
+    "fct_data_compliance_monthly": "gold",
+    "vw_rep_monthly_neighbourhood_avg_price": "gold",
+    "vw_rep_monthly_top10_overpriced": "gold",
+    "vw_rep_monthly_top10_underpriced": "gold",
+    "vw_rep_monthly_data_compliance": "gold",
+    "rec_avg_price_comparison": "metadata",
+    "rec_top10_price_delta_comparison": "metadata",
+    "rec_reporting_view_comparison": "metadata",
+}
+
+SCHEMAS = ("bronze", "silver", "gold", "metadata")
+
+
+def _q(name: str, postgres: bool) -> str:
+    """Schema-qualify a table/view name for Postgres DDL; bare name for SQLite."""
+    if not postgres:
+        return name
+    return f"{_SCHEMA_OF[name]}.{name}"
+
 
 def create_all(conn) -> None:
-    """Create every table, index, and view in the ModularSnapshotETL database."""
+    """Create every schema, table, index, and view in the database."""
     postgres = is_postgres(conn)
     cur = _DDLCursor(conn.cursor(), postgres)
-    _create_etl_tables(cur, postgres)
-    _create_raw_tables(cur)
-    _create_staging_tables(cur)
-    _create_dimension_tables(cur)
-    _create_fact_tables(cur)
+    if postgres:
+        for schema in SCHEMAS:
+            cur.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+        cur.execute("SET search_path TO gold, silver, bronze, metadata, public")
+    _create_metadata_tables(cur, postgres)
+    _create_raw_tables(cur, postgres)
+    _create_staging_tables(cur, postgres)
+    _create_dimension_tables(cur, postgres)
+    _create_fact_tables(cur, postgres)
     if postgres:
         # Views select dim_listing.listing_id, which blocks ALTER COLUMN
         # TYPE while they exist. Drop them first; _create_presentation_views
         # below recreates all of them unconditionally anyway.
-        _drop_presentation_views(cur)
-        _migrate_bigint_columns(cur)
-    _create_presentation_views(cur)
-    _create_reconciliation_tables(cur)
+        _drop_presentation_views(cur, postgres)
+        _migrate_bigint_columns(cur, postgres)
+    _create_presentation_views(cur, postgres)
+    _create_reconciliation_tables(cur, postgres)
     conn.commit()
 
 
@@ -61,22 +106,24 @@ _PRESENTATION_VIEWS = [
 ]
 
 
-def _drop_presentation_views(cur) -> None:
+def _drop_presentation_views(cur, postgres) -> None:
     for view in _PRESENTATION_VIEWS:
-        cur.execute(f"DROP VIEW IF EXISTS {view}")
+        cur.execute(f"DROP VIEW IF EXISTS {_q(view, postgres)}")
 
 
-def _migrate_bigint_columns(cur) -> None:
+def _migrate_bigint_columns(cur, postgres) -> None:
     for table, column in _BIGINT_COLUMNS:
         cur.execute(
             """SELECT data_type FROM information_schema.columns
-               WHERE table_name = %s AND column_name = %s""",
-            (table, column),
+               WHERE table_schema = %s AND table_name = %s AND column_name = %s""",
+            (_SCHEMA_OF[table], table, column),
         )
         row = cur.fetchall()
-        current_type = row[0][0] if row else None
+        if not row:
+            continue  # column doesn't exist (yet) on this database -- nothing to migrate
+        current_type = row[0][0]
         if current_type != "bigint":
-            cur.execute(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE BIGINT")
+            cur.execute(f"ALTER TABLE {_q(table, postgres)} ALTER COLUMN {column} TYPE BIGINT")
 
 
 class _DDLCursor:
@@ -97,16 +144,19 @@ class _DDLCursor:
 
 
 # ------------------------------------------------------------------
-# ETL Logging
+# Metadata Layer (pipeline execution/error logs, audit, watermark, visitors)
 # ------------------------------------------------------------------
 
-def _create_etl_tables(cur, postgres: bool) -> None:
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS etl_run_log (
+def _create_metadata_tables(cur, postgres: bool) -> None:
+    t = _q("pipeline_execution_log", postgres)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {t} (
             run_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            pipeline_name       TEXT,
             start_time          TEXT NOT NULL,
             end_time            TEXT,
             status              TEXT NOT NULL DEFAULT 'RUNNING',
+            rows_processed      INTEGER,
             city                TEXT,
             snapshot_month      TEXT,
             source_file_path    TEXT,
@@ -118,34 +168,77 @@ def _create_etl_tables(cur, postgres: bool) -> None:
         )
     """)
 
-    # Migrate existing databases: add triggered_by column if missing
+    # Migrate existing databases: add columns introduced after the initial
+    # etl_run_log -> pipeline_execution_log rename, if missing.
+    new_cols = {"pipeline_name": "TEXT", "rows_processed": "INTEGER", "triggered_by": "TEXT"}
     if postgres:
-        cur.execute("ALTER TABLE etl_run_log ADD COLUMN IF NOT EXISTS triggered_by TEXT")
+        for col, coltype in new_cols.items():
+            cur.execute(f"ALTER TABLE {t} ADD COLUMN IF NOT EXISTS {col} {coltype}")
     else:
-        existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(etl_run_log)").fetchall()}
-        if "triggered_by" not in existing_cols:
-            cur.execute("ALTER TABLE etl_run_log ADD COLUMN triggered_by TEXT")
+        existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(pipeline_execution_log)").fetchall()}
+        for col, coltype in new_cols.items():
+            if col not in existing_cols:
+                cur.execute(f"ALTER TABLE {t} ADD COLUMN {col} {coltype}")
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS etl_error_log (
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("pipeline_error_log", postgres)} (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             run_id          INTEGER NOT NULL,
             table_name      TEXT,
             error_type      TEXT NOT NULL,
             error_details   TEXT,
             timestamp       TEXT NOT NULL,
-            FOREIGN KEY (run_id) REFERENCES etl_run_log(run_id)
+            FOREIGN KEY (run_id) REFERENCES pipeline_execution_log(run_id)
+        )
+    """)
+
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("row_count_reconciliation", postgres)} (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id              INTEGER NOT NULL,
+            table_name          TEXT NOT NULL,
+            source_row_count    INTEGER,
+            target_row_count    INTEGER,
+            checksum_source     TEXT,
+            checksum_target     TEXT,
+            match_status        TEXT NOT NULL CHECK(match_status IN ('matched', 'mismatched')),
+            checked_at          TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES pipeline_execution_log(run_id)
+        )
+    """)
+
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("watermark_control", postgres)} (
+            table_name                   TEXT PRIMARY KEY,
+            last_successful_load_timestamp TEXT,
+            last_run_id                  INTEGER
+        )
+    """)
+
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("visitor_log", postgres)} (
+            visit_id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_uuid     TEXT NOT NULL UNIQUE,
+            first_seen_at    TEXT NOT NULL,
+            last_seen_at     TEXT NOT NULL,
+            ip_address       TEXT,
+            user_agent       TEXT,
+            city             TEXT,
+            country          TEXT,
+            ran_pipeline     INTEGER NOT NULL DEFAULT 0,
+            page_views       INTEGER NOT NULL DEFAULT 1
         )
     """)
 
 
 # ------------------------------------------------------------------
-# Raw Layer
+# Bronze Layer (raw)
 # ------------------------------------------------------------------
 
-def _create_raw_tables(cur) -> None:
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS raw_listings (
+def _create_raw_tables(cur, postgres: bool) -> None:
+    t = _q("raw_listings", postgres)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {t} (
             raw_id              INTEGER PRIMARY KEY AUTOINCREMENT,
             id                  BIGINT,
             listing_url         TEXT,
@@ -231,19 +324,20 @@ def _create_raw_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
+    cur.execute(f"""
         CREATE INDEX IF NOT EXISTS idx_raw_listings_city_month
-        ON raw_listings(city, snapshot_month)
+        ON {t}(city, snapshot_month)
     """)
 
 
 # ------------------------------------------------------------------
-# Staging Layer
+# Silver Layer (staging)
 # ------------------------------------------------------------------
 
-def _create_staging_tables(cur) -> None:
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS stg_listings (
+def _create_staging_tables(cur, postgres: bool) -> None:
+    t = _q("stg_listings", postgres)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {t} (
             stg_id              INTEGER PRIMARY KEY AUTOINCREMENT,
             id                  BIGINT NOT NULL,
             city                TEXT NOT NULL,
@@ -305,19 +399,19 @@ def _create_staging_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
+    cur.execute(f"""
         CREATE INDEX IF NOT EXISTS idx_stg_listings_city_month
-        ON stg_listings(city, snapshot_month)
+        ON {t}(city, snapshot_month)
     """)
 
 
 # ------------------------------------------------------------------
-# Dimension Layer
+# Gold Layer — Dimensions
 # ------------------------------------------------------------------
 
-def _create_dimension_tables(cur) -> None:
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS dim_date (
+def _create_dimension_tables(cur, postgres: bool) -> None:
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("dim_date", postgres)} (
             date_key        INTEGER PRIMARY KEY,
             month_key       INTEGER NOT NULL,
             month_start_date TEXT NOT NULL,
@@ -326,8 +420,8 @@ def _create_dimension_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS dim_city (
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("dim_city", postgres)} (
             city_key        INTEGER PRIMARY KEY AUTOINCREMENT,
             city_name       TEXT NOT NULL UNIQUE,
             country         TEXT NOT NULL DEFAULT 'US',
@@ -338,8 +432,9 @@ def _create_dimension_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS dim_neighbourhood (
+    t = _q("dim_neighbourhood", postgres)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {t} (
             neighbourhood_key               INTEGER PRIMARY KEY AUTOINCREMENT,
             city_key                         INTEGER NOT NULL,
             neighbourhood                    TEXT,
@@ -352,8 +447,9 @@ def _create_dimension_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS dim_host (
+    t = _q("dim_host", postgres)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {t} (
             host_key                INTEGER PRIMARY KEY AUTOINCREMENT,
             host_id                 BIGINT NOT NULL,
             host_name               TEXT,
@@ -374,13 +470,14 @@ def _create_dimension_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
+    cur.execute(f"""
         CREATE INDEX IF NOT EXISTS idx_dim_host_current
-        ON dim_host(host_id, is_current)
+        ON {t}(host_id, is_current)
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS dim_listing (
+    t = _q("dim_listing", postgres)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {t} (
             listing_key     INTEGER PRIMARY KEY AUTOINCREMENT,
             listing_id      BIGINT NOT NULL,
             property_type   TEXT,
@@ -397,19 +494,20 @@ def _create_dimension_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
+    cur.execute(f"""
         CREATE INDEX IF NOT EXISTS idx_dim_listing_current
-        ON dim_listing(listing_id, is_current)
+        ON {t}(listing_id, is_current)
     """)
 
 
 # ------------------------------------------------------------------
-# Fact Layer
+# Gold Layer — Facts
 # ------------------------------------------------------------------
 
-def _create_fact_tables(cur) -> None:
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS fct_listing_monthly_snapshot (
+def _create_fact_tables(cur, postgres: bool) -> None:
+    t = _q("fct_listing_monthly_snapshot", postgres)
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {t} (
             snapshot_id         INTEGER PRIMARY KEY AUTOINCREMENT,
             month_key           INTEGER NOT NULL,
             city_key            INTEGER NOT NULL,
@@ -432,13 +530,13 @@ def _create_fact_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
+    cur.execute(f"""
         CREATE INDEX IF NOT EXISTS idx_fct_snapshot_month_city
-        ON fct_listing_monthly_snapshot(month_key, city_key)
+        ON {t}(month_key, city_key)
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS fct_neighbourhood_monthly_avg_price (
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("fct_neighbourhood_monthly_avg_price", postgres)} (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             month_key           INTEGER NOT NULL,
             city_key            INTEGER NOT NULL,
@@ -452,8 +550,8 @@ def _create_fact_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS fct_neighbourhood_monthly_top10_price_delta (
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("fct_neighbourhood_monthly_top10_price_delta", postgres)} (
             id                      INTEGER PRIMARY KEY AUTOINCREMENT,
             month_key               INTEGER NOT NULL,
             city_key                INTEGER NOT NULL,
@@ -472,8 +570,8 @@ def _create_fact_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS fct_data_compliance_monthly (
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("fct_data_compliance_monthly", postgres)} (
             id                                  INTEGER PRIMARY KEY AUTOINCREMENT,
             month_key                           INTEGER NOT NULL,
             city_key                            INTEGER NOT NULL,
@@ -489,13 +587,13 @@ def _create_fact_tables(cur) -> None:
 
 
 # ------------------------------------------------------------------
-# Presentation Layer (Views)
+# Gold Layer — Reporting Views
 # ------------------------------------------------------------------
 
-def _create_presentation_views(cur) -> None:
-    cur.execute("DROP VIEW IF EXISTS vw_rep_monthly_neighbourhood_avg_price")
-    cur.execute("""
-        CREATE VIEW vw_rep_monthly_neighbourhood_avg_price AS
+def _create_presentation_views(cur, postgres: bool) -> None:
+    cur.execute(f"DROP VIEW IF EXISTS {_q('vw_rep_monthly_neighbourhood_avg_price', postgres)}")
+    cur.execute(f"""
+        CREATE VIEW {_q('vw_rep_monthly_neighbourhood_avg_price', postgres)} AS
         SELECT
             dd.month_start_date,
             dd.year,
@@ -513,9 +611,9 @@ def _create_presentation_views(cur) -> None:
         JOIN dim_neighbourhood dn ON f.neighbourhood_key = dn.neighbourhood_key
     """)
 
-    cur.execute("DROP VIEW IF EXISTS vw_rep_monthly_top10_overpriced")
-    cur.execute("""
-        CREATE VIEW vw_rep_monthly_top10_overpriced AS
+    cur.execute(f"DROP VIEW IF EXISTS {_q('vw_rep_monthly_top10_overpriced', postgres)}")
+    cur.execute(f"""
+        CREATE VIEW {_q('vw_rep_monthly_top10_overpriced', postgres)} AS
         SELECT
             dd.month_start_date,
             dd.year,
@@ -540,9 +638,9 @@ def _create_presentation_views(cur) -> None:
         WHERE f.delta_type = 'OVERPRICED'
     """)
 
-    cur.execute("DROP VIEW IF EXISTS vw_rep_monthly_top10_underpriced")
-    cur.execute("""
-        CREATE VIEW vw_rep_monthly_top10_underpriced AS
+    cur.execute(f"DROP VIEW IF EXISTS {_q('vw_rep_monthly_top10_underpriced', postgres)}")
+    cur.execute(f"""
+        CREATE VIEW {_q('vw_rep_monthly_top10_underpriced', postgres)} AS
         SELECT
             dd.month_start_date,
             dd.year,
@@ -567,9 +665,9 @@ def _create_presentation_views(cur) -> None:
         WHERE f.delta_type = 'UNDERPRICED'
     """)
 
-    cur.execute("DROP VIEW IF EXISTS vw_rep_monthly_data_compliance")
-    cur.execute("""
-        CREATE VIEW vw_rep_monthly_data_compliance AS
+    cur.execute(f"DROP VIEW IF EXISTS {_q('vw_rep_monthly_data_compliance', postgres)}")
+    cur.execute(f"""
+        CREATE VIEW {_q('vw_rep_monthly_data_compliance', postgres)} AS
         SELECT
             dd.month_start_date,
             dd.year,
@@ -587,12 +685,12 @@ def _create_presentation_views(cur) -> None:
 
 
 # ------------------------------------------------------------------
-# Reconciliation Layer (data comparison / audit)
+# Metadata Layer — Business-Rule Reconciliation (data comparison / audit)
 # ------------------------------------------------------------------
 
-def _create_reconciliation_tables(cur) -> None:
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS rec_avg_price_comparison (
+def _create_reconciliation_tables(cur, postgres: bool) -> None:
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("rec_avg_price_comparison", postgres)} (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             month_key           INTEGER NOT NULL,
             city_key            INTEGER NOT NULL,
@@ -612,8 +710,8 @@ def _create_reconciliation_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS rec_top10_price_delta_comparison (
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("rec_top10_price_delta_comparison", postgres)} (
             id                          INTEGER PRIMARY KEY AUTOINCREMENT,
             month_key                   INTEGER NOT NULL,
             city_key                    INTEGER NOT NULL,
@@ -641,8 +739,8 @@ def _create_reconciliation_tables(cur) -> None:
         )
     """)
 
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS rec_reporting_view_comparison (
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {_q("rec_reporting_view_comparison", postgres)} (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             month_key           INTEGER NOT NULL,
             city_key            INTEGER NOT NULL,

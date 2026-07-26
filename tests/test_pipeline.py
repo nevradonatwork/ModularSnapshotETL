@@ -30,7 +30,7 @@ class TestPipeline:
         run(db_conn, sample_csv, "new-york")
 
         row = db_conn.execute(
-            "SELECT status, city, source_file_name FROM etl_run_log ORDER BY run_id DESC LIMIT 1"
+            "SELECT status, city, source_file_name FROM pipeline_execution_log ORDER BY run_id DESC LIMIT 1"
         ).fetchone()
         assert row[0] == "SUCCESS"
         assert row[1] == "new-york"
@@ -41,7 +41,7 @@ class TestPipeline:
             run(db_conn, str(tmp_path / "nope.csv"), "test")
 
         row = db_conn.execute(
-            "SELECT status, city FROM etl_run_log ORDER BY run_id DESC LIMIT 1"
+            "SELECT status, city FROM pipeline_execution_log ORDER BY run_id DESC LIMIT 1"
         ).fetchone()
         assert row[0] == "FAILED"
         assert row[1] == "test"
@@ -73,7 +73,7 @@ class TestPipeline:
         run(db_conn, sample_csv, "new-york")
 
         row = db_conn.execute(
-            "SELECT archived_file_path FROM etl_run_log ORDER BY run_id DESC LIMIT 1"
+            "SELECT archived_file_path FROM pipeline_execution_log ORDER BY run_id DESC LIMIT 1"
         ).fetchone()
         assert row[0] is not None
         assert "archive" in row[0]
