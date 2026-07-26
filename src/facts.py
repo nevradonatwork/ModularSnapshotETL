@@ -200,7 +200,7 @@ def load_fct_neighbourhood_monthly_top10_price_delta(
     if facts.empty:
         return 0
 
-    total = 0
+    records = []
 
     # Process for each room_type group (per room type + ALL)
     for rt in avgs["room_type"].unique():
@@ -231,30 +231,28 @@ def load_fct_neighbourhood_monthly_top10_price_delta(
                 top_n["rank_in_neighbourhood"] = range(1, len(top_n) + 1)
 
                 for _, row in top_n.iterrows():
-                    conn.execute(
-                        """INSERT INTO fct_neighbourhood_monthly_top10_price_delta
-                           (month_key, city_key, neighbourhood_key, listing_key,
-                            room_type, price_amount, neighbourhood_avg_price,
-                            price_delta, price_delta_pct,
-                            rank_in_neighbourhood, delta_type)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            month_key,
-                            city_key,
-                            int(row["neighbourhood_key"]),
-                            int(row["listing_key"]),
-                            rt,
-                            float(row["price_amount"]),
-                            float(row["avg_price"]),
-                            float(row["price_delta"]),
-                            float(row["price_delta_pct"]),
-                            int(row["rank_in_neighbourhood"]),
-                            delta_type,
-                        ),
-                    )
-                    total += 1
+                    records.append({
+                        "month_key": month_key,
+                        "city_key": city_key,
+                        "neighbourhood_key": int(row["neighbourhood_key"]),
+                        "listing_key": int(row["listing_key"]),
+                        "room_type": rt,
+                        "price_amount": float(row["price_amount"]),
+                        "neighbourhood_avg_price": float(row["avg_price"]),
+                        "price_delta": float(row["price_delta"]),
+                        "price_delta_pct": float(row["price_delta_pct"]),
+                        "rank_in_neighbourhood": int(row["rank_in_neighbourhood"]),
+                        "delta_type": delta_type,
+                    })
 
-    conn.commit()
+    # One batched insert instead of one execute() per row -- against a
+    # remote Postgres, each round trip pays full network latency, which
+    # adds up fast for cities with many neighbourhoods/room types.
+    insert_df = pd.DataFrame.from_records(records)
+    db.bulk_insert(conn, "fct_neighbourhood_monthly_top10_price_delta", insert_df)
+    conn.commit()  # ensures the DELETE above lands even if insert_df is empty
+    total = len(insert_df)
+
     logger.info(
         "Loaded %d rows into fct_neighbourhood_monthly_top10_price_delta", total
     )

@@ -67,7 +67,7 @@ def reconcile_avg_price(
     )
 
     merged = _outer_merge(stg, fct, ["neighbourhood_key", "room_type"])
-    total = 0
+    records = []
 
     for _, row in merged.iterrows():
         nb_key = row["neighbourhood_key"]
@@ -84,19 +84,30 @@ def reconcile_avg_price(
         price_diff_pct = round((price_diff / fct_avg) * 100, 2) if price_diff is not None and fct_avg else None
         count_diff = (stg_cnt - fct_cnt) if stg_cnt is not None and fct_cnt is not None else None
 
-        conn.execute(
-            """INSERT INTO rec_avg_price_comparison
-               (month_key, city_key, neighbourhood_key, room_type,
-                stg_avg_price, stg_listing_count, fct_avg_price, fct_listing_count,
-                price_diff, price_diff_pct, count_diff, match_status, checked_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (month_key, city_key, int(nb_key), row["room_type"],
-             stg_avg, stg_cnt, fct_avg, fct_cnt,
-             price_diff, price_diff_pct, count_diff, status, now),
-        )
-        total += 1
+        records.append({
+            "month_key": month_key,
+            "city_key": city_key,
+            "neighbourhood_key": int(nb_key),
+            "room_type": row["room_type"],
+            "stg_avg_price": stg_avg,
+            "stg_listing_count": stg_cnt,
+            "fct_avg_price": fct_avg,
+            "fct_listing_count": fct_cnt,
+            "price_diff": price_diff,
+            "price_diff_pct": price_diff_pct,
+            "count_diff": count_diff,
+            "match_status": status,
+            "checked_at": now,
+        })
 
-    conn.commit()
+    # One batched insert instead of one execute() per row -- against a
+    # remote Postgres, each round trip pays full network latency, which
+    # adds up fast for cities with many neighbourhoods/room types.
+    insert_df = pd.DataFrame.from_records(records)
+    db.bulk_insert(conn, "rec_avg_price_comparison", insert_df)
+    conn.commit()  # ensures the DELETE above lands even if insert_df is empty
+    total = len(insert_df)
+
     logger.info("Reconciled %d avg price rows (month_key=%d, city_key=%d)", total, month_key, city_key)
     return total
 
@@ -204,14 +215,21 @@ def reconcile_top10_price_delta(
         (month_key, city_key),
     )
 
-    total = 0
+    records = []
     for rt in stg_avgs["room_type"].unique():
-        total += _reconcile_room_type_deltas(
-            conn, facts, stg_avgs, fct_top10, rt, n,
+        records.extend(_reconcile_room_type_deltas(
+            facts, stg_avgs, fct_top10, rt, n,
             month_key, city_key, now,
-        )
+        ))
 
-    conn.commit()
+    # One batched insert instead of one execute() per row -- against a
+    # remote Postgres, each round trip pays full network latency, which
+    # adds up fast for cities with many neighbourhoods/room types.
+    insert_df = pd.DataFrame.from_records(records)
+    db.bulk_insert(conn, "rec_top10_price_delta_comparison", insert_df)
+    conn.commit()  # ensures the DELETE above lands even if insert_df is empty
+    total = len(insert_df)
+
     logger.info(
         "Reconciled %d top-10 price delta rows (month_key=%d, city_key=%d)",
         total, month_key, city_key,
@@ -219,13 +237,13 @@ def reconcile_top10_price_delta(
     return total
 
 
-def _reconcile_room_type_deltas(conn, facts, stg_avgs, fct_top10, rt, n,
+def _reconcile_room_type_deltas(facts, stg_avgs, fct_top10, rt, n,
                                 month_key, city_key, now):
-    """Reconcile top-N deltas for a single room_type. Returns rows inserted."""
+    """Reconcile top-N deltas for a single room_type. Returns a list of records."""
     avgs_rt = stg_avgs[stg_avgs["room_type"] == rt][["neighbourhood_key", "avg_price"]]
     facts_rt = facts.copy() if rt == "ALL" else facts[facts["room_type"] == rt].copy()
     if facts_rt.empty:
-        return 0
+        return []
 
     merged = facts_rt.merge(avgs_rt, on="neighbourhood_key")
     merged["price_delta"] = (merged["price_amount"] - merged["avg_price"]).round(2)
@@ -233,7 +251,7 @@ def _reconcile_room_type_deltas(conn, facts, stg_avgs, fct_top10, rt, n,
         (merged["price_delta"] / merged["avg_price"]) * 100
     ).round(2)
 
-    total = 0
+    records = []
     for nb_key in merged["neighbourhood_key"].unique():
         nb_data = merged[merged["neighbourhood_key"] == nb_key]
         for delta_type, ascending in [("OVERPRICED", False), ("UNDERPRICED", True)]:
@@ -241,16 +259,16 @@ def _reconcile_room_type_deltas(conn, facts, stg_avgs, fct_top10, rt, n,
             top_n["rank"] = range(1, len(top_n) + 1)
 
             for _, stg_row in top_n.iterrows():
-                total += _insert_delta_comparison(
-                    conn, stg_row, fct_top10, nb_key, rt, delta_type,
+                records.append(_build_delta_comparison_record(
+                    stg_row, fct_top10, nb_key, rt, delta_type,
                     month_key, city_key, now,
-                )
-    return total
+                ))
+    return records
 
 
-def _insert_delta_comparison(conn, stg_row, fct_top10, nb_key, rt, delta_type,
-                             month_key, city_key, now):
-    """Insert one rec_top10_price_delta_comparison row. Returns 1."""
+def _build_delta_comparison_record(stg_row, fct_top10, nb_key, rt, delta_type,
+                                    month_key, city_key, now):
+    """Build one rec_top10_price_delta_comparison record."""
     listing_key = int(stg_row["listing_key"])
     stg_delta = float(stg_row["price_delta"])
     stg_rank = int(stg_row["rank"])
@@ -277,24 +295,28 @@ def _insert_delta_comparison(conn, stg_row, fct_top10, nb_key, rt, delta_type,
     price_delta_diff = round(stg_delta - fct_delta, 2) if fct_delta is not None else None
     rank_diff = stg_rank - fct_rank if fct_rank is not None else None
 
-    conn.execute(
-        """INSERT INTO rec_top10_price_delta_comparison
-           (month_key, city_key, neighbourhood_key, listing_key,
-            room_type, delta_type,
-            stg_price_amount, stg_neighbourhood_avg_price,
-            stg_price_delta, stg_price_delta_pct, stg_rank,
-            fct_price_amount, fct_neighbourhood_avg_price,
-            fct_price_delta, fct_price_delta_pct, fct_rank,
-            price_delta_diff, rank_diff, match_status, checked_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (month_key, city_key, int(nb_key), listing_key,
-         rt, delta_type,
-         float(stg_row["price_amount"]), float(stg_row["avg_price"]),
-         stg_delta, float(stg_row["price_delta_pct"]), stg_rank,
-         fct_price, fct_avg, fct_delta, fct_delta_pct, fct_rank,
-         price_delta_diff, rank_diff, status, now),
-    )
-    return 1
+    return {
+        "month_key": month_key,
+        "city_key": city_key,
+        "neighbourhood_key": int(nb_key),
+        "listing_key": listing_key,
+        "room_type": rt,
+        "delta_type": delta_type,
+        "stg_price_amount": float(stg_row["price_amount"]),
+        "stg_neighbourhood_avg_price": float(stg_row["avg_price"]),
+        "stg_price_delta": stg_delta,
+        "stg_price_delta_pct": float(stg_row["price_delta_pct"]),
+        "stg_rank": stg_rank,
+        "fct_price_amount": fct_price,
+        "fct_neighbourhood_avg_price": fct_avg,
+        "fct_price_delta": fct_delta,
+        "fct_price_delta_pct": fct_delta_pct,
+        "fct_rank": fct_rank,
+        "price_delta_diff": price_delta_diff,
+        "rank_diff": rank_diff,
+        "match_status": status,
+        "checked_at": now,
+    }
 
 
 # ------------------------------------------------------------------
