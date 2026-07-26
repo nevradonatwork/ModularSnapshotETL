@@ -158,28 +158,88 @@ def read_sql(conn, sql, params=None) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=cols)
 
 
+def _rows_for_insert(df: pd.DataFrame) -> list:
+    """DataFrame rows as tuples with NaN/NaT converted to None.
+
+    Pandas' own to_sql does this implicitly, but Postgres (unlike SQLite)
+    rejects a bare NaN for non-float columns.
+    """
+    clean_df = df.astype(object).where(df.notna(), None)
+    return [tuple(r) for r in clean_df.itertuples(index=False, name=None)]
+
+
 def bulk_insert(conn, table: str, df: pd.DataFrame) -> None:
     """Append DataFrame rows into `table` — portable across sqlite3/Postgres."""
     if df.empty:
         return
 
     cols = list(df.columns)
-    # Convert NaN/NaT to None — pandas' own to_sql does this implicitly, but
-    # Postgres (unlike SQLite) rejects a bare NaN for non-float columns.
-    clean_df = df.astype(object).where(df.notna(), None)
-    values = [tuple(r) for r in clean_df.itertuples(index=False, name=None)]
+    values = _rows_for_insert(df)
 
     if is_postgres(conn):
         from psycopg2.extras import execute_values
 
         sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES %s"
-        execute_values(conn.raw_cursor(), sql, values)
+        execute_values(conn.raw_cursor(), sql, values, page_size=1000)
     else:
         placeholders = ", ".join(["?"] * len(cols))
         sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})"
         conn.executemany(sql, values)
 
     conn.commit()
+
+
+def bulk_upsert(conn, table: str, df: pd.DataFrame, conflict_cols: list) -> None:
+    """Bulk INSERT ... ON CONFLICT DO UPDATE, portable across sqlite3/Postgres.
+
+    Much faster than one execute() per row against Postgres, where each
+    round trip pays full network latency. update_cols is every column
+    that isn't part of the conflict key.
+    """
+    if df.empty:
+        return
+
+    cols = list(df.columns)
+    update_cols = [c for c in cols if c not in conflict_cols]
+    values = _rows_for_insert(df)
+
+    conflict_clause = ", ".join(conflict_cols)
+    update_clause = ", ".join(f"{c} = excluded.{c}" for c in update_cols)
+    on_conflict = f"ON CONFLICT ({conflict_clause}) DO UPDATE SET {update_clause}"
+
+    if is_postgres(conn):
+        from psycopg2.extras import execute_values
+
+        sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES %s {on_conflict}"
+        execute_values(conn.raw_cursor(), sql, values, page_size=1000)
+    else:
+        placeholders = ", ".join(["?"] * len(cols))
+        sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders}) {on_conflict}"
+        conn.executemany(sql, values)
+
+    conn.commit()
+
+
+def bulk_insert_returning(conn, table: str, df: pd.DataFrame, returning_cols: list) -> list:
+    """Bulk INSERT with RETURNING, returning a list of result tuples.
+
+    Postgres only (uses psycopg2's execute_values fetch mode) — callers
+    on SQLite should insert row-by-row instead, since that's already fast
+    without network round trips.
+    """
+    if df.empty:
+        return []
+
+    cols = list(df.columns)
+    values = _rows_for_insert(df)
+
+    from psycopg2.extras import execute_values
+
+    sql = (
+        f"INSERT INTO {table} ({', '.join(cols)}) VALUES %s "
+        f"RETURNING {', '.join(returning_cols)}"
+    )
+    return execute_values(conn.raw_cursor(), sql, values, page_size=1000, fetch=True)
 
 
 def table_columns(conn, table_name: str) -> set:
