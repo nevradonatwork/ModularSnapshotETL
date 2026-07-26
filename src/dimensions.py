@@ -10,6 +10,8 @@ import os
 
 import pandas as pd
 
+from src import db
+
 logger = logging.getLogger(__name__)
 
 
@@ -358,6 +360,20 @@ def load_dim_hosts(
     # SCD2 tracking attributes
     track_attrs = [c for c in available_cols if c != "host_id"]
 
+    if db.is_postgres(conn):
+        # Batched: a handful of round trips total instead of ~2 per host,
+        # which matters a lot once a city has thousands of unique hosts.
+        mapping = _load_dim_hosts_batched(conn, hosts, available_cols, track_attrs, snapshot_month)
+    else:
+        # SQLite is a local file — row-by-row has no network latency to pay.
+        mapping = _load_dim_hosts_row_by_row(conn, hosts, track_attrs, snapshot_month)
+
+    conn.commit()
+    logger.info("Loaded %d hosts", len(mapping))
+    return mapping
+
+
+def _load_dim_hosts_row_by_row(conn, hosts, track_attrs, snapshot_month):
     mapping = {}
     for _, row in hosts.iterrows():
         hid = row["host_id"]
@@ -390,6 +406,7 @@ def load_dim_hosts(
             )
 
         # Insert new current record
+        available_cols = ["host_id"] + track_attrs
         placeholders = ", ".join(["?"] * (len(available_cols) + 1))
         col_names = ", ".join(available_cols + ["valid_from"])
         new_key = conn.execute(
@@ -398,8 +415,61 @@ def load_dim_hosts(
         ).fetchone()[0]
         mapping[hid] = new_key
 
-    conn.commit()
-    logger.info("Loaded %d hosts", len(mapping))
+    return mapping
+
+
+def _load_dim_hosts_batched(conn, hosts, available_cols, track_attrs, snapshot_month):
+    mapping = {}
+    valid_ids = sorted({int(h) for h in hosts["host_id"].dropna().tolist()})
+    if not valid_ids:
+        return mapping
+
+    placeholders = ", ".join(["?"] * len(valid_ids))
+    existing = db.read_sql(
+        conn,
+        f"""SELECT host_key, host_id, {", ".join(track_attrs)} FROM dim_host
+            WHERE is_current = 1 AND host_id IN ({placeholders})""",
+        tuple(valid_ids),
+    )
+    existing_by_id = {
+        int(row["host_id"]): (int(row["host_key"]), tuple(_safe_val(row[c]) for c in track_attrs))
+        for _, row in existing.iterrows()
+    }
+
+    to_close = []
+    to_insert_rows = []
+    for _, row in hosts.iterrows():
+        hid = row["host_id"]
+        if pd.isna(hid):
+            continue
+        hid = int(hid)
+        new_vals = tuple(_safe_val(row.get(c)) for c in track_attrs)
+
+        if hid in existing_by_id:
+            host_key, old_vals = existing_by_id[hid]
+            if old_vals == new_vals:
+                mapping[hid] = host_key
+                continue
+            to_close.append(host_key)
+
+        to_insert_rows.append(row)
+
+    if to_close:
+        close_placeholders = ", ".join(["?"] * len(to_close))
+        conn.execute(
+            f"UPDATE dim_host SET valid_to = ?, is_current = 0 WHERE host_key IN ({close_placeholders})",
+            [snapshot_month] + to_close,
+        )
+
+    if to_insert_rows:
+        insert_df = pd.DataFrame(to_insert_rows)[["host_id"] + track_attrs].copy()
+        insert_df["valid_from"] = snapshot_month
+        new_rows = db.bulk_insert_returning(
+            conn, "dim_host", insert_df, returning_cols=["host_id", "host_key"]
+        )
+        for hid_val, host_key in new_rows:
+            mapping[int(hid_val)] = host_key
+
     return mapping
 
 
@@ -422,6 +492,17 @@ def load_dim_listings(
 
     listings = stg_df[available_cols].drop_duplicates(subset=["id"])
 
+    if db.is_postgres(conn):
+        mapping = _load_dim_listings_batched(conn, listings, track_attrs, snapshot_month)
+    else:
+        mapping = _load_dim_listings_row_by_row(conn, listings, track_attrs, snapshot_month)
+
+    conn.commit()
+    logger.info("Loaded %d listings into dim_listing", len(mapping))
+    return mapping
+
+
+def _load_dim_listings_row_by_row(conn, listings, track_attrs, snapshot_month):
     mapping = {}
     for _, row in listings.iterrows():
         lid = int(row["id"])
@@ -459,8 +540,58 @@ def load_dim_listings(
         ).fetchone()[0]
         mapping[lid] = new_key
 
-    conn.commit()
-    logger.info("Loaded %d listings into dim_listing", len(mapping))
+    return mapping
+
+
+def _load_dim_listings_batched(conn, listings, track_attrs, snapshot_month):
+    mapping = {}
+    valid_ids = sorted({int(i) for i in listings["id"].dropna().tolist()})
+    if not valid_ids:
+        return mapping
+
+    placeholders = ", ".join(["?"] * len(valid_ids))
+    existing = db.read_sql(
+        conn,
+        f"""SELECT listing_key, listing_id, {", ".join(track_attrs)} FROM dim_listing
+            WHERE is_current = 1 AND listing_id IN ({placeholders})""",
+        tuple(valid_ids),
+    )
+    existing_by_id = {
+        int(row["listing_id"]): (int(row["listing_key"]), tuple(_safe_val(row[c]) for c in track_attrs))
+        for _, row in existing.iterrows()
+    }
+
+    to_close = []
+    to_insert_rows = []
+    for _, row in listings.iterrows():
+        lid = int(row["id"])
+        new_vals = tuple(_safe_val(row.get(c)) for c in track_attrs)
+
+        if lid in existing_by_id:
+            listing_key, old_vals = existing_by_id[lid]
+            if old_vals == new_vals:
+                mapping[lid] = listing_key
+                continue
+            to_close.append(listing_key)
+
+        to_insert_rows.append(row)
+
+    if to_close:
+        close_placeholders = ", ".join(["?"] * len(to_close))
+        conn.execute(
+            f"UPDATE dim_listing SET valid_to = ?, is_current = 0 WHERE listing_key IN ({close_placeholders})",
+            [snapshot_month] + to_close,
+        )
+
+    if to_insert_rows:
+        insert_df = pd.DataFrame(to_insert_rows)[["id"] + track_attrs].rename(columns={"id": "listing_id"}).copy()
+        insert_df["valid_from"] = snapshot_month
+        new_rows = db.bulk_insert_returning(
+            conn, "dim_listing", insert_df, returning_cols=["listing_id", "listing_key"]
+        )
+        for lid_val, listing_key in new_rows:
+            mapping[int(lid_val)] = listing_key
+
     return mapping
 
 

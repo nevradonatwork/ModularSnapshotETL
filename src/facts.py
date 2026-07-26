@@ -50,7 +50,7 @@ def load_fct_listing_monthly_snapshot(
         (month_key, city_key),
     )
 
-    rows_inserted = 0
+    records = []
     for _, row in stg.iterrows():
         lid = int(row["id"]) if pd.notna(row.get("id")) else None
         hid = int(row["host_id"]) if pd.notna(row.get("host_id")) else None
@@ -63,43 +63,33 @@ def load_fct_listing_monthly_snapshot(
         if not all([listing_key, host_key, neighbourhood_key]):
             continue
 
-        conn.execute(
-            """INSERT INTO fct_listing_monthly_snapshot
-               (month_key, city_key, neighbourhood_key, listing_key, host_key,
-                price_amount, availability_30, availability_60, availability_90,
-                availability_365, number_of_reviews, reviews_per_month,
-                review_scores_rating)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (month_key, city_key, listing_key) DO UPDATE SET
-                   neighbourhood_key = excluded.neighbourhood_key,
-                   host_key = excluded.host_key,
-                   price_amount = excluded.price_amount,
-                   availability_30 = excluded.availability_30,
-                   availability_60 = excluded.availability_60,
-                   availability_90 = excluded.availability_90,
-                   availability_365 = excluded.availability_365,
-                   number_of_reviews = excluded.number_of_reviews,
-                   reviews_per_month = excluded.reviews_per_month,
-                   review_scores_rating = excluded.review_scores_rating""",
-            (
-                month_key,
-                city_key,
-                neighbourhood_key,
-                listing_key,
-                host_key,
-                _safe(row.get("price_amount")),
-                _safe_int(row.get("availability_30")),
-                _safe_int(row.get("availability_60")),
-                _safe_int(row.get("availability_90")),
-                _safe_int(row.get("availability_365")),
-                _safe_int(row.get("number_of_reviews")),
-                _safe(row.get("reviews_per_month")),
-                _safe(row.get("review_scores_rating")),
-            ),
-        )
-        rows_inserted += 1
+        records.append({
+            "month_key": month_key,
+            "city_key": city_key,
+            "neighbourhood_key": neighbourhood_key,
+            "listing_key": listing_key,
+            "host_key": host_key,
+            "price_amount": _safe(row.get("price_amount")),
+            "availability_30": _safe_int(row.get("availability_30")),
+            "availability_60": _safe_int(row.get("availability_60")),
+            "availability_90": _safe_int(row.get("availability_90")),
+            "availability_365": _safe_int(row.get("availability_365")),
+            "number_of_reviews": _safe_int(row.get("number_of_reviews")),
+            "reviews_per_month": _safe(row.get("reviews_per_month")),
+            "review_scores_rating": _safe(row.get("review_scores_rating")),
+        })
 
-    conn.commit()
+    # One batched upsert instead of one execute() per row -- against a
+    # remote Postgres, each round trip pays full network latency, so this
+    # matters a lot for cities with thousands of listings.
+    insert_df = pd.DataFrame.from_records(records)
+    db.bulk_upsert(
+        conn, "fct_listing_monthly_snapshot", insert_df,
+        conflict_cols=["month_key", "city_key", "listing_key"],
+    )
+    conn.commit()  # ensures the DELETE above lands even if insert_df is empty
+    rows_inserted = len(insert_df)
+
     logger.info(
         "Loaded %d rows into fct_listing_monthly_snapshot (month_key=%d, city_key=%d)",
         rows_inserted, month_key, city_key,
