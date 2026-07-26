@@ -28,9 +28,55 @@ def create_all(conn) -> None:
     _create_staging_tables(cur)
     _create_dimension_tables(cur)
     _create_fact_tables(cur)
+    if postgres:
+        # Views select dim_listing.listing_id, which blocks ALTER COLUMN
+        # TYPE while they exist. Drop them first; _create_presentation_views
+        # below recreates all of them unconditionally anyway.
+        _drop_presentation_views(cur)
+        _migrate_bigint_columns(cur)
     _create_presentation_views(cur)
     _create_reconciliation_tables(cur)
     conn.commit()
+
+
+# Airbnb natural keys (scrape_id, listing/host ids) can exceed Postgres's
+# 4-byte INTEGER range (e.g. scrape_id is a 14-digit number). CREATE TABLE
+# IF NOT EXISTS won't widen a column on a database whose tables were
+# already created before this fix, so migrate it explicitly.
+_BIGINT_COLUMNS = [
+    ("raw_listings", "id"),
+    ("raw_listings", "scrape_id"),
+    ("raw_listings", "host_id"),
+    ("stg_listings", "id"),
+    ("stg_listings", "host_id"),
+    ("dim_host", "host_id"),
+    ("dim_listing", "listing_id"),
+]
+
+_PRESENTATION_VIEWS = [
+    "vw_rep_monthly_neighbourhood_avg_price",
+    "vw_rep_monthly_top10_overpriced",
+    "vw_rep_monthly_top10_underpriced",
+    "vw_rep_monthly_data_compliance",
+]
+
+
+def _drop_presentation_views(cur) -> None:
+    for view in _PRESENTATION_VIEWS:
+        cur.execute(f"DROP VIEW IF EXISTS {view}")
+
+
+def _migrate_bigint_columns(cur) -> None:
+    for table, column in _BIGINT_COLUMNS:
+        cur.execute(
+            """SELECT data_type FROM information_schema.columns
+               WHERE table_name = %s AND column_name = %s""",
+            (table, column),
+        )
+        row = cur.fetchall()
+        current_type = row[0][0] if row else None
+        if current_type != "bigint":
+            cur.execute(f"ALTER TABLE {table} ALTER COLUMN {column} TYPE BIGINT")
 
 
 class _DDLCursor:
