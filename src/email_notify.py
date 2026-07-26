@@ -37,7 +37,7 @@ def _get_latest_run(conn: sqlite3.Connection) -> dict | None:
     """Fetch the most recent ETL run log entry."""
     row = conn.execute(
         "SELECT run_id, start_time, end_time, status, row_counts, error_message "
-        "FROM etl_run_log ORDER BY run_id DESC LIMIT 1"
+        "FROM pipeline_execution_log ORDER BY run_id DESC LIMIT 1"
     ).fetchone()
     if not row:
         return None
@@ -55,7 +55,7 @@ def _get_run_errors(conn: sqlite3.Connection, run_id: int) -> list[dict]:
     """Fetch all error log entries for a given run."""
     rows = conn.execute(
         "SELECT table_name, error_type, error_details, timestamp "
-        "FROM etl_error_log WHERE run_id = ? ORDER BY id",
+        "FROM pipeline_error_log WHERE run_id = ? ORDER BY id",
         (run_id,),
     ).fetchall()
     return [
@@ -243,7 +243,7 @@ def send_run_notification(
     """Send an email notification with the latest pipeline run summary.
 
     Args:
-        conn: SQLite database connection (to read etl_run_log / etl_error_log).
+        conn: SQLite database connection (to read pipeline_execution_log / pipeline_error_log).
         cities: List of cities that were processed.
         failed: List of cities that failed.
 

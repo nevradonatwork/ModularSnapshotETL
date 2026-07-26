@@ -91,6 +91,13 @@ class PGConnection:
         for attempt in range(1, attempts + 1):
             try:
                 self._conn = psycopg2.connect(dsn, connect_timeout=10)
+                # Every table/view name is unique across the bronze/silver/
+                # gold/metadata schemas (see src/schema.py), so setting this
+                # once per connection lets every unqualified table reference
+                # elsewhere in the app resolve to the right schema.
+                self._conn.cursor().execute(
+                    "SET search_path TO gold, silver, bronze, metadata, public"
+                )
                 return
             except psycopg2.OperationalError as e:
                 last_error = e
@@ -245,8 +252,11 @@ def bulk_insert_returning(conn, table: str, df: pd.DataFrame, returning_cols: li
 def table_columns(conn, table_name: str) -> set:
     """Return the set of column names for a table — portable across sqlite3/Postgres."""
     if is_postgres(conn):
+        # Scope to schemas on the current search_path, so this can't return
+        # columns from an unrelated same-named table in a different schema.
         cur = conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+            """SELECT column_name FROM information_schema.columns
+               WHERE table_name = ? AND table_schema = ANY(current_schemas(false))""",
             (table_name,),
         )
         return {row[0] for row in cur.fetchall()}

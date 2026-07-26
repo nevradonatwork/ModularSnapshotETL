@@ -23,7 +23,7 @@ from src.validation import REQUIRED_COLUMNS
 
 def _log_user_error(city_slug: str, message: str) -> None:
     """Record a pre-pipeline user-facing failure (bad city, download, schema)
-    in etl_run_log/etl_error_log, so it shows up in Run History alongside
+    in pipeline_execution_log/pipeline_error_log, so it shows up in Run History alongside
     pipeline runs."""
     conn = db.get_connection(DB_PATH)
     create_all(conn)
@@ -226,7 +226,7 @@ try:
         SELECT run_id, start_time, end_time, status, city, snapshot_month,
                source_file_name, archived_file_path, row_counts,
                error_message, triggered_by
-        FROM etl_run_log
+        FROM pipeline_execution_log
         ORDER BY start_time DESC
         LIMIT 20
         """,
@@ -278,7 +278,7 @@ try:
                 errors = db.read_sql(
                     conn,
                     "SELECT table_name, error_type, error_details, timestamp "
-                    "FROM etl_error_log WHERE run_id = ? ORDER BY timestamp",
+                    "FROM pipeline_error_log WHERE run_id = ? ORDER BY timestamp",
                     (int(selected_run),),
                 )
                 if not errors.empty:
