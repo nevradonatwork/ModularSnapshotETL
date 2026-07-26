@@ -1,6 +1,6 @@
 # ModularSnapshotETL Data Platform
 
-A layered data engineering platform that transforms raw Airbnb-style listing data into a SQLite analytical warehouse with dimensional modelling, data quality controls, and BI-ready reporting views.
+A medallion-architecture data engineering platform that transforms raw Airbnb-style listing data into a Postgres (Neon) analytical warehouse — SQLite locally — with dimensional modelling, data quality controls, pipeline observability, and BI-ready reporting views.
 
 **Live Dashboard:** [modularsnapshotetl.streamlit.app](https://modularsnapshotetl.streamlit.app/)
 
@@ -23,7 +23,7 @@ Then run:
 python main.py
 ```
 
-The pipeline auto-discovers all city subdirectories, processes them through six data layers, and writes everything into `ModularSnapshotETL.db`.
+The pipeline auto-discovers all city subdirectories, processes them through the bronze/silver/gold layers, and writes everything into `ModularSnapshotETL.db` locally (or the configured Postgres/Neon database in production — see `src/db.py`).
 
 ## Business Outputs
 
@@ -37,59 +37,71 @@ The platform produces three core insights for market intelligence:
 
 This solution intentionally follows **KISS** (Keep It Simple, Stupid) and **YAGNI** (You Aren't Gonna Need It):
 
-- **SQLite over cloud warehouses** — a single-file embedded database with zero infrastructure, full SQL support, and portability. The schema translates directly to BigQuery/Snowflake when scale requires it.
-- **No heavy frameworks** — no Airflow, no Spark, no ORM. The pipeline uses only `pandas` and Python's built-in `sqlite3`. Complexity is added when justified, not before.
+- **Postgres in production, SQLite locally** — Neon (serverless Postgres) backs the live dashboard so data persists across restarts; a single-file SQLite database is used for local development and the test suite, via a thin backend-agnostic connection layer (`src/db.py`).
+- **No heavy frameworks** — no Airflow, no Spark, no ORM. The pipeline uses only `pandas` and a small SQL layer. Complexity is added when justified, not before.
 - **Cron-based scheduling** — the simplest reliable job runner. Advanced orchestration (Airflow, Dagster) is deferred until the number of cities or job dependencies demands it.
-- **Layering is pragmatic, not ceremonial** — each layer (raw, staging, dimensions, facts, views) exists because it solves one specific problem: auditability, deduplication, history tracking, aggregation, and BI readability.
+- **Layering is pragmatic, not ceremonial** — each layer (bronze, silver, gold, metadata) exists because it solves one specific problem: auditability, deduplication, history tracking, aggregation, and pipeline observability.
 - **No synthetic business logic** — listings with null or zero prices are excluded, not estimated. Only real observed data flows into analytics to preserve analytical integrity.
 - **Refactoring over speculation** — features were built incrementally. Advanced orchestration, distributed processing, and cloud-native services are intentionally deferred until scale requires them.
 
 ## Data Architecture
 
-The pipeline stores data across five logical layers inside a single SQLite database:
+The pipeline follows a **medallion architecture**. In production (Postgres/Neon)
+each layer is a real Postgres schema; locally (SQLite) every table lives in one
+flat namespace, since SQLite has no equivalent to Postgres schemas — every
+table/view name is unique across layers, so a single `SET search_path` per
+Postgres connection lets all application SQL stay schema-agnostic (see
+`src/db.py`).
 
-| Layer | Prefix | Purpose |
-|-------|--------|---------|
-| Raw | `raw_` | Immutable landing storage — source data exactly as received |
-| Staging | `stg_` | Cleansed, standardised, and deduplicated |
-| Dimension | `dim_` | Conformed dimensions (date, city, neighbourhood, host, listing) |
-| Fact | `fct_` | Analytical fact tables (monthly snapshots, aggregations) |
-| Presentation | `vw_rep_` | BI-ready reporting views for dashboards |
-| Reconciliation | `rec_` | Data comparison and integrity verification |
+| Schema | Prefix | Purpose |
+|--------|--------|---------|
+| `bronze` | `raw_` | Immutable landing storage — source data exactly as received |
+| `silver` | `stg_` | Cleansed, standardised, and deduplicated |
+| `gold` | `dim_` / `fct_` / `vw_rep_` | Conformed dimensions, fact tables, and BI-ready reporting views |
+| `metadata` | `pipeline_`, `row_count_`, `watermark_`, `visitor_`, `rec_` | Pipeline execution/error logs, row-count + checksum reconciliation, watermark tracking, visitor analytics, and business-rule reconciliation |
 
 ### Tables
 
-**Raw & Staging:**
+**Bronze (raw):**
 - `raw_listings` — append-only, one row per listing per file load
+
+**Silver (staging):**
 - `stg_listings` — deduplicated by `(city, snapshot_month, id)`
 
-**Dimensions:**
+**Gold — Dimensions:**
 - `dim_date` — month-level date dimension
 - `dim_city` — city metadata (country, timezone, currency)
 - `dim_neighbourhood` — neighbourhood hierarchy per city
 - `dim_host` — host attributes with SCD Type 2 history
 - `dim_listing` — listing attributes with SCD Type 2 history
 
-**Facts:**
+**Gold — Facts:**
 - `fct_listing_monthly_snapshot` — base fact at listing + month + city grain
 - `fct_neighbourhood_monthly_avg_price` — aggregated neighbourhood averages per room type + combined "ALL"
 - `fct_neighbourhood_monthly_top10_price_delta` — top 10 over/underpriced listings per room type + combined "ALL"
 - `fct_data_compliance_monthly` — monthly data-compliance counters per city
 
-**Reporting Views:**
+**Gold — Reporting Views:**
 - `vw_rep_monthly_neighbourhood_avg_price`
 - `vw_rep_monthly_top10_overpriced`
 - `vw_rep_monthly_top10_underpriced`
 - `vw_rep_monthly_data_compliance`
 
-**Reconciliation:**
+**Metadata — Pipeline Logging:**
+- `pipeline_execution_log` — pipeline execution tracking (pipeline name, start, end, status, rows processed, city, snapshot_month, source file path, archived file path, row counts)
+- `pipeline_error_log` — detailed error and warning records
+
+**Metadata — Audit (generic, table-agnostic):**
+- `row_count_reconciliation` — source vs target row count + checksum per load stage, per run (`src/audit.py`)
+- `watermark_control` — last successful load timestamp + run id, per table
+
+**Metadata — Visitor Analytics:**
+- `visitor_log` — one row per browser session: first/last seen, IP, user-agent, best-effort city/country, whether the session ran the pipeline, page-view count (`src/visitor_log.py`)
+
+**Metadata — Business-Rule Reconciliation** (deeper than the generic audit tables above — independently recomputes values and compares them, not just row counts):
 - `rec_avg_price_comparison` — staging-calculated avg prices vs `fct_neighbourhood_monthly_avg_price`
 - `rec_top10_price_delta_comparison` — staging-calculated top-10 over/underpriced vs `fct_neighbourhood_monthly_top10_price_delta`
 - `rec_reporting_view_comparison` — fact table row counts vs reporting view row counts
-
-**ETL Logging:**
-- `etl_run_log` — pipeline execution tracking (start, end, status, city, snapshot_month, source file path, archived file path, row counts)
-- `etl_error_log` — detailed error and warning records
 
 ## Pipeline Execution Flow
 
@@ -102,8 +114,8 @@ The pipeline stores data across five logical layers inside a single SQLite datab
 7. Upsert dimension tables (SCD2 for hosts and listings)
 8. Load fact tables (base + aggregated) — **geo-flagged rows excluded**
 9. **Reconciliation** — independently verify staging vs fact tables vs reporting views
-10. Reporting views refresh automatically (SQLite views)
-11. Log execution metrics to `etl_run_log` (with file metadata and archived path)
+10. Reporting views refresh automatically (native database views, both backends)
+11. Log execution metrics to `pipeline_execution_log` (with file metadata and archived path)
 
 ## Idempotency
 
@@ -119,7 +131,7 @@ The `snapshot_month` key ensures complete isolation between monthly runs.
 
 ## File Traceability & Archiving
 
-Each pipeline run records full file metadata in `etl_run_log`:
+Each pipeline run records full file metadata in `pipeline_execution_log`:
 
 - **city** — the city being processed
 - **snapshot_month** — derived from the data
@@ -157,7 +169,7 @@ This is a **data quality / geo-consistency flag**. It validates the listing's ph
 - **Raw layer**: all rows kept as-is (immutable audit trail)
 - **Staging layer**: flagged rows are **kept** with `geo_out_of_city_flag = 1` — data is never silently deleted
 - **Fact layer**: flagged rows are **excluded** from aggregates to prevent skewed analytics
-- The count of flagged rows is logged to `etl_error_log` as `GEO_OUT_OF_CITY`
+- The count of flagged rows is logged to `pipeline_error_log` as `GEO_OUT_OF_CITY`
 - Row counts include `geo_out_of_city_count` for monitoring
 
 ## Data Compliance Tracking
@@ -269,6 +281,44 @@ SELECT * FROM rec_avg_price_comparison WHERE match_status != 'MATCH';
 SELECT * FROM rec_reporting_view_comparison WHERE match_status != 'MATCH';
 ```
 
+## Pipeline Observability — Row-Count Reconciliation & Watermarks
+
+Separate from the business-rule reconciliation above, `src/audit.py` runs a
+shallower, generic check at three points in every pipeline run — bronze
+(`raw_listings`), silver (`stg_listings`), and the base gold fact table
+(`fct_listing_monthly_snapshot`) — comparing source vs target row counts and a
+portable SHA-256 checksum over the id set, logged to
+`metadata.row_count_reconciliation`. The staging checkpoint commonly shows
+`mismatched` by design (dedup + invalid-price exclusion legitimately drop
+rows) — the table records the delta for visibility, it isn't a pass/fail gate.
+
+Every successfully loaded table also updates `metadata.watermark_control`
+(`last_successful_load_timestamp`, `last_run_id`) — bookkeeping on "when was
+this table last fully loaded," not a resumable-extraction cursor, since the
+pipeline ingests whole files per `(city, snapshot_month)` upload rather than a
+continuously-queryable growing source.
+
+```sql
+SELECT * FROM row_count_reconciliation WHERE match_status = 'mismatched';
+SELECT * FROM watermark_control ORDER BY last_successful_load_timestamp DESC;
+```
+
+## Visitor Analytics
+
+Every dashboard session (not just pipeline runs) is logged to
+`metadata.visitor_log` via `src/visitor_log.py`: first/last seen timestamps,
+IP address, user-agent, best-effort city/country (`ip-api.com`), whether the
+session ran the ETL pipeline, and a page-view count. Logged once per browser
+session (guarded by `st.session_state` in `app.py`, which reruns on every
+widget interaction/page switch). IP-based geolocation is best-effort and can
+be empty or wrong — Streamlit Cloud's proxy layer doesn't always expose a
+clean client IP — failures are silent and never block the dashboard.
+
+```sql
+SELECT COUNT(*) AS total_visits, SUM(ran_pipeline) AS visits_that_ran_etl
+FROM visitor_log;
+```
+
 ## Data Fetcher — Automatic City Discovery
 
 The platform includes a built-in data fetcher (`src/data_fetcher.py`) that can automatically download listing data from [Inside Airbnb](https://insideairbnb.com/get-the-data/).
@@ -335,14 +385,17 @@ ModularSnapshotETL/
 ├── crontab                # Schedule definition for the orchestrator
 ├── requirements.txt       # Python dependencies
 ├── src/
-│   ├── schema.py          # DDL for all tables, indexes, and views
-│   ├── ingestion.py       # Raw and staging layer loading
+│   ├── db.py              # Backend-agnostic connection layer (Postgres/Neon or SQLite)
+│   ├── schema.py          # DDL for all schemas, tables, indexes, and views
+│   ├── ingestion.py       # Bronze and silver layer loading
 │   ├── validation.py      # Schema checks and data quality controls
-│   ├── etl_logging.py     # ETL run/error logging
+│   ├── etl_logging.py     # Pipeline execution/error logging
+│   ├── audit.py           # Row-count/checksum reconciliation and watermark tracking
+│   ├── visitor_log.py     # Visitor session logging for the dashboard
 │   ├── email_notify.py    # Email notifications after pipeline runs
 │   ├── dimensions.py      # Dimension table upserts (SCD2)
 │   ├── facts.py           # Fact table loading and aggregations
-│   ├── reconciliation.py  # Data comparison across layers
+│   ├── reconciliation.py  # Business-rule data comparison across layers
 │   ├── pipeline.py        # Orchestrates the full execution flow
 │   └── data_fetcher.py    # Inside Airbnb data fetcher (100-city catalog + live scraper)
 ├── pages/
@@ -357,16 +410,20 @@ ModularSnapshotETL/
 │   ├── filters.py         # City and filter rendering
 │   ├── pipeline_runner.py # ETL pipeline execution for the dashboard
 │   └── data_dictionary.py # Data dictionary utilities
+├── scripts/
+│   └── migrate_to_medallion_schema.sql # One-time production migration to bronze/silver/gold/metadata
 ├── tests/
 │   ├── conftest.py        # Shared fixtures (in-memory DB, sample data)
 │   ├── test_ingestion.py  # Raw/staging layer tests
 │   ├── test_dimensions.py # Dimension loading and SCD2 tests
 │   ├── test_facts.py      # Fact tables and presentation view tests
 │   ├── test_reconciliation.py # Reconciliation layer tests
+│   ├── test_audit.py      # Row-count/checksum reconciliation and watermark tests
+│   ├── test_visitor_log.py # Visitor session logging tests
 │   ├── test_pipeline.py   # End-to-end pipeline tests
 │   └── test_main.py       # City discovery tests
 ├── dataset/               # Input: dataset/<city>/listings.csv.gz (not committed)
-└── ModularSnapshotETL.db  # Output: SQLite database (not committed)
+└── ModularSnapshotETL.db  # Output: local SQLite database (not committed; Postgres/Neon in production)
 ```
 
 ## Live Dashboard
@@ -407,7 +464,7 @@ Each notification email includes:
 - **Cities processed** and **cities failed**
 - **Row counts** per table layer
 - **Reconciliation summary** — match/mismatch counts across all 3 rec tables, with specific mismatch details when issues are detected
-- **Detailed errors and warnings** from `etl_error_log`
+- **Detailed errors and warnings** from `pipeline_error_log`
 
 ## Scheduling
 
