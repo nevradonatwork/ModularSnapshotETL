@@ -57,7 +57,7 @@ This is the fastest way to see the reporting experience and check whether KPI/fi
 Please read `PRODUCTION_DEPLOYMENT.md` for:
 - scheduler/orchestration assumptions
 - file archival and traceability model
-- run logging/monitoring approach (`etl_run_log`, `etl_error_log`)
+- run logging/monitoring approach (`pipeline_execution_log`, `pipeline_error_log`)
 - rerun/backfill strategy
 - operational assumptions and production constraints
 

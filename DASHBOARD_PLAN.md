@@ -202,11 +202,11 @@ If the run fails, show the error message from the exception.
 
 Below the run status, show a collapsible `st.expander("Run History")`:
 
-- Query `etl_run_log` ordered by `start_time DESC`, limit 20.
+- Query `pipeline_execution_log` ordered by `start_time DESC`, limit 20.
 - Display as `st.dataframe` with columns: `run_id`, `start_time`, `end_time`, `status`, `city`, `snapshot_month`, `source_file_name`, `archived_file_path`.
 - Click a row (use `st.data_editor` with selection or `st.selectbox`) to show:
   - `row_counts` JSON parsed and displayed as metric cards.
-  - Errors from `etl_error_log` for that `run_id`.
+  - Errors from `pipeline_error_log` for that `run_id`.
   - Schema drift warnings (error_type containing "UNKNOWN_COLUMN" or "SCHEMA").
 
 ---
@@ -347,12 +347,12 @@ ORDER BY month_start_date DESC
 - **Missing Neighbourhood**: `missing_neighbourhood_cleansed_count`
 - **Missing Room Type**: `missing_room_type_count`
 
-**Also query geo count** from `etl_error_log`:
+**Also query geo count** from `pipeline_error_log`:
 ```sql
 SELECT CAST(error_details AS TEXT) as details
-FROM   etl_error_log
+FROM   pipeline_error_log
 WHERE  error_type = 'GEO_OUT_OF_CITY'
-  AND  run_id = (SELECT MAX(run_id) FROM etl_run_log WHERE city = :city AND snapshot_month = :month)
+  AND  run_id = (SELECT MAX(run_id) FROM pipeline_execution_log WHERE city = :city AND snapshot_month = :month)
 ```
 
 - **Geo Out-of-City**: Parse count from error_details string.
@@ -636,8 +636,8 @@ INSIDE_AIRBNB_CITIES = [
 
 ### 1. Run History Panel (Page 2)
 
-- Query `etl_run_log` and display as an interactive table.
-- Click a row → expand to show `row_counts` JSON (parsed), `etl_error_log` entries, archived file path.
+- Query `pipeline_execution_log` and display as an interactive table.
+- Click a row → expand to show `row_counts` JSON (parsed), `pipeline_error_log` entries, archived file path.
 - Shows real pipeline provenance and auditability.
 
 ### 2. "What Am I Seeing?" Tooltips (Page 3)
@@ -658,9 +658,9 @@ When a user selects a row in Top 10 tables, show:
 
 ### 4. Schema Drift Visibility (Page 2)
 
-After a run, query `etl_error_log` for error_type containing "UNKNOWN_COLUMN":
+After a run, query `pipeline_error_log` for error_type containing "UNKNOWN_COLUMN":
 ```sql
-SELECT error_details FROM etl_error_log
+SELECT error_details FROM pipeline_error_log
 WHERE run_id = :run_id AND error_type LIKE '%UNKNOWN%'
 ```
 If results exist, show a yellow badge: "Schema changes detected" with the column list.
@@ -683,7 +683,7 @@ Add a collapsible `st.expander("Reconciliation Results")` at the bottom of the D
 | Fail fast on missing columns | Pre-flight validation on Page 2 checks required columns before running pipeline. |
 | Clear error messages | Use `st.error()` with descriptive text. Never show raw tracebacks. |
 | Scoped deletes only | Pipeline already scopes deletes to `(city, snapshot_month)`. No change needed. |
-| Run logging | Every run logged to `etl_run_log` with file paths. Visible in Run History panel. |
+| Run logging | Every run logged to `pipeline_execution_log` with file paths. Visible in Run History panel. |
 | Minimal UI | Clean Streamlit defaults. No custom CSS unless strictly needed. Wide layout. |
 | Demo-ready | One command: `streamlit run app.py`. Works with or without pre-loaded data. |
 

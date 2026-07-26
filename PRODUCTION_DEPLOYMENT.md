@@ -35,8 +35,8 @@ automatic retries, backfill capabilities, and a monitoring UI.
 - Data quality checks: no duplicate keys in staging, critical columns not null, price > 0, availability between 0–365
 - Geo validation: listing coordinates checked against per-city bounding boxes (see Geo Validation section below)
 - Critical validation failures cause the pipeline to fail fast
-- Warnings are logged to `etl_error_log` with full context
-- All runs tracked in `etl_run_log` with start/end times, status, city, snapshot_month, source file path, archived file path, row counts, and error messages
+- Warnings are logged to `pipeline_error_log` with full context
+- All runs tracked in `pipeline_execution_log` with start/end times, status, city, snapshot_month, source file path, archived file path, row counts, and error messages
 - Pipeline returns non-zero exit code on failure for cron monitoring
 
 **File Archiving:** After successful raw ingestion, the source file is moved to an archive
@@ -50,7 +50,7 @@ Example: `dataset/new-york/archive/new-york_2025-09-01_20260213T104527Z_listings
 
 Key behaviours:
 - The archive directory (`dataset/<city>/archive/`) is created automatically
-- Both the original path and archived path are recorded in `etl_run_log` for full traceability
+- Both the original path and archived path are recorded in `pipeline_execution_log` for full traceability
 - If raw ingestion fails, the file is **not** archived — it remains in place for investigation and retry
 - UTC timestamp in the filename ensures uniqueness across multiple runs of the same month
 - For reprocessing, retrieve the file from the archive directory and place it back in the city directory
@@ -74,7 +74,7 @@ Data flow for geo-flagged rows:
 - **Raw layer**: all rows kept (immutable audit trail)
 - **Staging layer**: flagged rows are kept with `geo_out_of_city_flag = 1` — data is never silently deleted
 - **Fact layer**: flagged rows are excluded from aggregates to prevent skewed neighbourhood pricing analytics
-- **Logging**: count of flagged rows logged to `etl_error_log` as `GEO_OUT_OF_CITY`
+- **Logging**: count of flagged rows logged to `pipeline_error_log` as `GEO_OUT_OF_CITY`
 
 Bounding boxes are configured in `CITY_BOUNDARIES` in `src/validation.py` for: new-york,
 chicago, los-angeles, san-francisco, new-orleans. Cities without a configured bounding box
@@ -104,9 +104,9 @@ and provides a searchable city dropdown covering all 100 catalogued cities.
 - Missing columns (ValidationError — fail fast)
 - Invalid date format (coerced to null)
 - Schema drift — only columns matching the raw table schema are written; unknown columns are ignored and logged for visibility but do not break the pipeline. Staging uses a known column set, isolating downstream layers from source schema changes.
-- Null or zero prices — listings with invalid prices are excluded from analysis and logged to `etl_error_log` with the count of excluded rows. No synthetic price estimation is performed.
+- Null or zero prices — listings with invalid prices are excluded from analysis and logged to `pipeline_error_log` with the count of excluded rows. No synthetic price estimation is performed.
 
-**Monitoring & Alerting:** Pipeline health metrics are stored in `etl_run_log`:
+**Monitoring & Alerting:** Pipeline health metrics are stored in `pipeline_execution_log`:
 - Run duration (start_time, end_time)
 - City and snapshot_month per run
 - Source file path and file name
@@ -114,7 +114,7 @@ and provides a searchable city dropdown covering all 100 catalogued cities.
 - Row counts per layer (JSON in row_counts column), including `geo_out_of_city_count`
 - Success/failure status
 - Error messages for failed runs
-- Detailed error log in `etl_error_log` with table name, error type, and timestamp
+- Detailed error log in `pipeline_error_log` with table name, error type, and timestamp
 - The pipeline returns a non-zero exit code on failure. In production, this exit code would trigger alerting via CloudWatch, Stackdriver, PagerDuty, or email integration with the orchestrator.
 
 **Scaling — Multi-City Expansion:** The dimensional model scales naturally to 20+ cities.
@@ -166,8 +166,8 @@ Operational expectation in production:
 
 **Failure Strategy:** The pipeline follows a fail-fast, isolate-per-city approach:
 - Structural failures (missing file, missing columns, corrupted gzip) halt the pipeline immediately for that city
-- Data quality warnings (duplicates, out-of-range values) are logged to `etl_error_log` but do not halt processing
-- If one city fails, the ETL run is marked FAILED in `etl_run_log` with the full error message; other cities continue processing independently
+- Data quality warnings (duplicates, out-of-range values) are logged to `pipeline_error_log` but do not halt processing
+- If one city fails, the ETL run is marked FAILED in `pipeline_execution_log` with the full error message; other cities continue processing independently
 - The pipeline returns a non-zero exit code if any city fails, enabling cron/orchestrator alerting
 - Partial state is never left in an ambiguous state — staging and fact layers are fully replaced per run, not incrementally appended
 
@@ -238,7 +238,7 @@ logic or data model.
 11. Each city is processed independently — no cross-city insights are needed initially.
 12. The `snapshot_month` is derived from `last_scraped` truncated to month start and stored as a
     date string (e.g., `2025-12-01`) in all tables. This is deterministic per record.
-13. If the pipeline fails for a city, the ETL run is marked as FAILED in `etl_run_log` with the
+13. If the pipeline fails for a city, the ETL run is marked as FAILED in `pipeline_execution_log` with the
     error message preserved. Other cities continue processing.
 14. Historical data is preserved across runs — the raw layer is append-only, and dimensions use
     SCD Type 2 to track changes over time.
@@ -250,7 +250,7 @@ logic or data model.
 16. The orchestrator environment has Python and the required dependencies pre-installed.
 17. The crontab schedule assumes monthly data drops. A change to weekly or daily frequency
     would require updating both the schedule and the snapshot_month derivation logic.
-18. The pipeline logs execution metrics to `etl_run_log` and `etl_error_log` and sends email
+18. The pipeline logs execution metrics to `pipeline_execution_log` and `pipeline_error_log` and sends email
     notifications with run summaries (configurable via environment variables). Business user
     notification that fresh insights are available remains an external concern.
 19. The cron schedule uses UTC (6:00 AM). This is assumed acceptable for all teams regardless
