@@ -187,6 +187,13 @@ if st.button("Ingest & Run Pipeline", disabled=run_disabled, type="primary"):
 
         st.success("Pipeline completed successfully!")
 
+        if "visitor_session_uuid" in st.session_state:
+            try:
+                from src import visitor_log
+                visitor_log.mark_ran_pipeline(db.get_connection(DB_PATH), st.session_state.visitor_session_uuid)
+            except Exception:
+                pass
+
         # --- Run Status Card ---
         st.subheader("Run Results")
         m1, m2, m3, m4 = st.columns(4)
