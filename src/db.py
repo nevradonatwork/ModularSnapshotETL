@@ -71,6 +71,9 @@ class PGCursor:
         self._cur.close()
 
 
+_SEARCH_PATH_SQL = "SET search_path TO gold, silver, bronze, metadata, public"
+
+
 class PGConnection:
     """Wraps a psycopg2 connection to add sqlite3's `.execute()` shortcut."""
 
@@ -95,9 +98,7 @@ class PGConnection:
                 # gold/metadata schemas (see src/schema.py), so setting this
                 # once per connection lets every unqualified table reference
                 # elsewhere in the app resolve to the right schema.
-                self._conn.cursor().execute(
-                    "SET search_path TO gold, silver, bronze, metadata, public"
-                )
+                self._conn.cursor().execute(_SEARCH_PATH_SQL)
                 return
             except psycopg2.OperationalError as e:
                 last_error = e
@@ -117,9 +118,23 @@ class PGConnection:
 
     def commit(self):
         self._conn.commit()
+        self._reassert_search_path()
 
     def rollback(self):
         self._conn.rollback()
+        self._reassert_search_path()
+
+    def _reassert_search_path(self):
+        # Defense in depth: a transaction-pooling proxy (e.g. Neon's pooled
+        # connection string, PgBouncer in "transaction" mode) can serve each
+        # transaction from a different backend session, silently dropping a
+        # session-level SET made earlier -- unqualified table references
+        # then fail with "relation does not exist" even though search_path
+        # was set at connect time. Re-asserting it after every commit/
+        # rollback (the transaction boundaries where a pooler would swap
+        # backends) costs one cheap statement and makes this class of bug
+        # impossible regardless of what kind of connection string is used.
+        self._conn.cursor().execute(_SEARCH_PATH_SQL)
 
     def close(self):
         self._conn.close()
