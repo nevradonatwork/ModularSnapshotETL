@@ -29,6 +29,7 @@ home = st.Page("pages/1_Home.py", title="Home", icon=":material/home:", default=
 load = st.Page("pages/2_Load_Data.py", title="Load Data", icon=":material/upload:")
 dash = st.Page("pages/3_Dashboard.py", title="Dashboard", icon=":material/bar_chart:")
 dictionary = st.Page("pages/4_Data_Dictionary.py", title="Data Dictionary", icon=":material/menu_book:")
+about = st.Page("pages/5_About.py", title="About", icon=":material/info:")
 
-pg = st.navigation([home, load, dash, dictionary])
+pg = st.navigation([home, load, dash, dictionary, about])
 pg.run()
