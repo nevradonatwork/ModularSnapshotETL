@@ -32,7 +32,7 @@ def compute_checksum(conn, sql: str, params=None) -> str:
 
 
 def checksum_from_series(values) -> str:
-    """Checksum an in-memory list/Series of values — same rule as compute_checksum."""
+    """Checksum an in-memory list/Series of values, same rule as compute_checksum."""
     sorted_values = sorted(str(v) for v in values)
     return hashlib.sha256(",".join(sorted_values).encode("utf-8")).hexdigest()
 

@@ -1,6 +1,6 @@
 # ModularSnapshotETL Data Platform
 
-A medallion-architecture data engineering platform that transforms raw Airbnb-style listing data into a Postgres (Neon) analytical warehouse — SQLite locally — with dimensional modelling, data quality controls, pipeline observability, and BI-ready reporting views.
+A medallion-architecture data engineering platform that transforms raw Airbnb-style listing data into a Postgres (Neon) analytical warehouse, SQLite locally, with dimensional modelling, data quality controls, pipeline observability, and BI-ready reporting views.
 
 **Live Dashboard:** [modularsnapshotetl.streamlit.app](https://modularsnapshotetl.streamlit.app/)
 
@@ -23,39 +23,39 @@ Then run:
 python main.py
 ```
 
-The pipeline auto-discovers all city subdirectories, processes them through the bronze/silver/gold layers, and writes everything into `ModularSnapshotETL.db` locally (or the configured Postgres/Neon database in production — see `src/db.py`).
+The pipeline auto-discovers all city subdirectories, processes them through the bronze/silver/gold layers, and writes everything into `ModularSnapshotETL.db` locally (or the configured Postgres/Neon database in production, see `src/db.py`).
 
 ## Business Outputs
 
 The platform produces three core insights for market intelligence:
 
-- **Monthly average price per night by neighbourhood and room type** — aggregated per room type (Entire home/apt, Private room, etc.) **and** as a combined "ALL" average, broken down by city and month, available via `vw_rep_monthly_neighbourhood_avg_price`
-- **Top 10 overpriced and top 10 underpriced listings** — each listing compared against both its room-type-specific neighbourhood average and the combined "ALL" neighbourhood average, with delta amount and percentage, available via `vw_rep_monthly_top10_overpriced` and `vw_rep_monthly_top10_underpriced`
-- **Monthly data compliance report** — per-city quality snapshot tracking missing prices, neighbourhoods, and room types, available via `vw_rep_monthly_data_compliance`
+- **Monthly average price per night by neighbourhood and room type**, aggregated per room type (Entire home/apt, Private room, etc.) **and** as a combined "ALL" average, broken down by city and month, available via `vw_rep_monthly_neighbourhood_avg_price`
+- **Top 10 overpriced and top 10 underpriced listings**, each listing compared against both its room-type-specific neighbourhood average and the combined "ALL" neighbourhood average, with delta amount and percentage, available via `vw_rep_monthly_top10_overpriced` and `vw_rep_monthly_top10_underpriced`
+- **Monthly data compliance report**, per-city quality snapshot tracking missing prices, neighbourhoods, and room types, available via `vw_rep_monthly_data_compliance`
 
 ## Design Philosophy
 
 This solution intentionally follows **KISS** (Keep It Simple, Stupid) and **YAGNI** (You Aren't Gonna Need It):
 
-- **Postgres in production, SQLite locally** — Neon (serverless Postgres) backs the live dashboard so data persists across restarts; a single-file SQLite database is used for local development and the test suite, via a thin backend-agnostic connection layer (`src/db.py`).
-- **No heavy frameworks** — no Airflow, no Spark, no ORM. The pipeline uses only `pandas` and a small SQL layer. Complexity is added when justified, not before.
-- **Cron-based scheduling** — the simplest reliable job runner. Advanced orchestration (Airflow, Dagster) is deferred until the number of cities or job dependencies demands it.
-- **Layering is pragmatic, not ceremonial** — each layer (bronze, silver, gold, metadata) exists because it solves one specific problem: auditability, deduplication, history tracking, aggregation, and pipeline observability.
-- **No synthetic business logic** — listings with null or zero prices are excluded, not estimated. Only real observed data flows into analytics to preserve analytical integrity.
-- **Refactoring over speculation** — features were built incrementally. Advanced orchestration, distributed processing, and cloud-native services are intentionally deferred until scale requires them.
+- **Postgres in production, SQLite locally**, Neon (serverless Postgres) backs the live dashboard so data persists across restarts; a single-file SQLite database is used for local development and the test suite, via a thin backend-agnostic connection layer (`src/db.py`).
+- **No heavy frameworks**, no Airflow, no Spark, no ORM. The pipeline uses only `pandas` and a small SQL layer. Complexity is added when justified, not before.
+- **Cron-based scheduling**, the simplest reliable job runner. Advanced orchestration (Airflow, Dagster) is deferred until the number of cities or job dependencies demands it.
+- **Layering is pragmatic, not ceremonial**, each layer (bronze, silver, gold, metadata) exists because it solves one specific problem: auditability, deduplication, history tracking, aggregation, and pipeline observability.
+- **No synthetic business logic**, listings with null or zero prices are excluded, not estimated. Only real observed data flows into analytics to preserve analytical integrity.
+- **Refactoring over speculation**, features were built incrementally. Advanced orchestration, distributed processing, and cloud-native services are intentionally deferred until scale requires them.
 
 ## Data Architecture
 
 The pipeline follows a **medallion architecture**. In production (Postgres/Neon)
 each layer is a real Postgres schema; locally (SQLite) every table lives in one
-flat namespace, since SQLite has no equivalent to Postgres schemas — every
+flat namespace, since SQLite has no equivalent to Postgres schemas, every
 table/view name is unique across layers, so a single `SET search_path` per
 Postgres connection lets all application SQL stay schema-agnostic (see
 `src/db.py`).
 
 | Schema | Prefix | Purpose |
 |--------|--------|---------|
-| `bronze` | `raw_` | Immutable landing storage — source data exactly as received |
+| `bronze` | `raw_` | Immutable landing storage, source data exactly as received |
 | `silver` | `stg_` | Cleansed, standardised, and deduplicated |
 | `gold` | `dim_` / `fct_` / `vw_rep_` | Conformed dimensions, fact tables, and BI-ready reporting views |
 | `metadata` | `pipeline_`, `row_count_`, `watermark_`, `visitor_`, `rec_` | Pipeline execution/error logs, row-count + checksum reconciliation, watermark tracking, visitor analytics, and business-rule reconciliation |
@@ -63,45 +63,45 @@ Postgres connection lets all application SQL stay schema-agnostic (see
 ### Tables
 
 **Bronze (raw):**
-- `raw_listings` — append-only, one row per listing per file load
+- `raw_listings`, append-only, one row per listing per file load
 
 **Silver (staging):**
-- `stg_listings` — deduplicated by `(city, snapshot_month, id)`
+- `stg_listings`, deduplicated by `(city, snapshot_month, id)`
 
-**Gold — Dimensions:**
-- `dim_date` — month-level date dimension
-- `dim_city` — city metadata (country, timezone, currency)
-- `dim_neighbourhood` — neighbourhood hierarchy per city
-- `dim_host` — host attributes with SCD Type 2 history
-- `dim_listing` — listing attributes with SCD Type 2 history
+**Gold, Dimensions:**
+- `dim_date`, month-level date dimension
+- `dim_city`, city metadata (country, timezone, currency)
+- `dim_neighbourhood`, neighbourhood hierarchy per city
+- `dim_host`, host attributes with SCD Type 2 history
+- `dim_listing`, listing attributes with SCD Type 2 history
 
-**Gold — Facts:**
-- `fct_listing_monthly_snapshot` — base fact at listing + month + city grain
-- `fct_neighbourhood_monthly_avg_price` — aggregated neighbourhood averages per room type + combined "ALL"
-- `fct_neighbourhood_monthly_top10_price_delta` — top 10 over/underpriced listings per room type + combined "ALL"
-- `fct_data_compliance_monthly` — monthly data-compliance counters per city
+**Gold, Facts:**
+- `fct_listing_monthly_snapshot`, base fact at listing + month + city grain
+- `fct_neighbourhood_monthly_avg_price`, aggregated neighbourhood averages per room type + combined "ALL"
+- `fct_neighbourhood_monthly_top10_price_delta`, top 10 over/underpriced listings per room type + combined "ALL"
+- `fct_data_compliance_monthly`, monthly data-compliance counters per city
 
-**Gold — Reporting Views:**
+**Gold, Reporting Views:**
 - `vw_rep_monthly_neighbourhood_avg_price`
 - `vw_rep_monthly_top10_overpriced`
 - `vw_rep_monthly_top10_underpriced`
 - `vw_rep_monthly_data_compliance`
 
-**Metadata — Pipeline Logging:**
-- `pipeline_execution_log` — pipeline execution tracking (pipeline name, start, end, status, rows processed, city, snapshot_month, source file path, archived file path, row counts)
-- `pipeline_error_log` — detailed error and warning records
+**Metadata, Pipeline Logging:**
+- `pipeline_execution_log`, pipeline execution tracking (pipeline name, start, end, status, rows processed, city, snapshot_month, source file path, archived file path, row counts)
+- `pipeline_error_log`, detailed error and warning records
 
-**Metadata — Audit (generic, table-agnostic):**
-- `row_count_reconciliation` — source vs target row count + checksum per load stage, per run (`src/audit.py`)
-- `watermark_control` — last successful load timestamp + run id, per table
+**Metadata, Audit (generic, table-agnostic):**
+- `row_count_reconciliation`, source vs target row count + checksum per load stage, per run (`src/audit.py`)
+- `watermark_control`, last successful load timestamp + run id, per table
 
-**Metadata — Visitor Analytics:**
-- `visitor_log` — one row per browser session: first/last seen, IP, user-agent, best-effort city/country, whether the session ran the pipeline, page-view count (`src/visitor_log.py`)
+**Metadata, Visitor Analytics:**
+- `visitor_log`, one row per browser session: first/last seen, IP, user-agent, best-effort city/country, whether the session ran the pipeline, page-view count (`src/visitor_log.py`)
 
-**Metadata — Business-Rule Reconciliation** (deeper than the generic audit tables above — independently recomputes values and compares them, not just row counts):
-- `rec_avg_price_comparison` — staging-calculated avg prices vs `fct_neighbourhood_monthly_avg_price`
-- `rec_top10_price_delta_comparison` — staging-calculated top-10 over/underpriced vs `fct_neighbourhood_monthly_top10_price_delta`
-- `rec_reporting_view_comparison` — fact table row counts vs reporting view row counts
+**Metadata, Business-Rule Reconciliation** (deeper than the generic audit tables above, independently recomputes values and compares them, not just row counts):
+- `rec_avg_price_comparison`, staging-calculated avg prices vs `fct_neighbourhood_monthly_avg_price`
+- `rec_top10_price_delta_comparison`, staging-calculated top-10 over/underpriced vs `fct_neighbourhood_monthly_top10_price_delta`
+- `rec_reporting_view_comparison`, fact table row counts vs reporting view row counts
 
 ## Pipeline Execution Flow
 
@@ -112,8 +112,8 @@ Postgres connection lets all application SQL stay schema-agnostic (see
 5. **Archive source file** to `dataset/<city>/archive/` (preserves processed artifact)
 6. Load `stg_listings` with cleansing, deduplication, and **geo validation**
 7. Upsert dimension tables (SCD2 for hosts and listings)
-8. Load fact tables (base + aggregated) — **geo-flagged rows excluded**
-9. **Reconciliation** — independently verify staging vs fact tables vs reporting views
+8. Load fact tables (base + aggregated), **geo-flagged rows excluded**
+9. **Reconciliation**, independently verify staging vs fact tables vs reporting views
 10. Reporting views refresh automatically (native database views, both backends)
 11. Log execution metrics to `pipeline_execution_log` (with file metadata and archived path)
 
@@ -121,10 +121,10 @@ Postgres connection lets all application SQL stay schema-agnostic (see
 
 The pipeline is safe to rerun for any city and month:
 
-- **Raw layer**: append-only — rerunning adds a new copy of the source data (full audit trail)
-- **Staging layer**: delete-then-insert scoped to `(city, snapshot_month)` — rerunning replaces only that month's cleaned data
-- **Dimensions**: upsert logic — existing records are matched; SCD2 creates new versions only when attributes change
-- **Facts**: delete-then-insert scoped to `(month_key, city_key)` — rerunning replaces that month's facts cleanly
+- **Raw layer**: append-only, rerunning adds a new copy of the source data (full audit trail)
+- **Staging layer**: delete-then-insert scoped to `(city, snapshot_month)`, rerunning replaces only that month's cleaned data
+- **Dimensions**: upsert logic, existing records are matched; SCD2 creates new versions only when attributes change
+- **Facts**: delete-then-insert scoped to `(month_key, city_key)`, rerunning replaces that month's facts cleanly
 - **No destructive operations**: other cities and months are never touched
 
 The `snapshot_month` key ensures complete isolation between monthly runs.
@@ -133,11 +133,11 @@ The `snapshot_month` key ensures complete isolation between monthly runs.
 
 Each pipeline run records full file metadata in `pipeline_execution_log`:
 
-- **city** — the city being processed
-- **snapshot_month** — derived from the data
-- **source_file_path** — original file location
-- **source_file_name** — file basename
-- **archived_file_path** — location after archiving
+- **city**, the city being processed
+- **snapshot_month**, derived from the data
+- **source_file_path**, original file location
+- **source_file_name**, file basename
+- **archived_file_path**, location after archiving
 
 After successful raw ingestion, the source file is moved to an archive directory:
 
@@ -162,12 +162,12 @@ Listings are validated against per-city bounding boxes during staging. The `geo_
 
 This is a **data quality / geo-consistency flag**. It validates the listing's physical property location (`latitude`, `longitude` columns from the dataset) against the expected geographic boundaries of the target city. For example, a listing filed under `new-york` but with coordinates pointing to Los Angeles (34.05, -118.25) would be flagged as `geo_out_of_city_flag = 1`.
 
-**Note:** This flag checks the **property's recorded coordinates**, not the host's declared location. A host may live in New Jersey but list a property in Manhattan — that property would pass geo validation because its lat/long falls within New York's bounding box.
+**Note:** This flag checks the **property's recorded coordinates**, not the host's declared location. A host may live in New Jersey but list a property in Manhattan, that property would pass geo validation because its lat/long falls within New York's bounding box.
 
 ### Policy
 
 - **Raw layer**: all rows kept as-is (immutable audit trail)
-- **Staging layer**: flagged rows are **kept** with `geo_out_of_city_flag = 1` — data is never silently deleted
+- **Staging layer**: flagged rows are **kept** with `geo_out_of_city_flag = 1`, data is never silently deleted
 - **Fact layer**: flagged rows are **excluded** from aggregates to prevent skewed analytics
 - The count of flagged rows is logged to `pipeline_error_log` as `GEO_OUT_OF_CITY`
 - Row counts include `geo_out_of_city_count` for monitoring
@@ -281,19 +281,19 @@ SELECT * FROM rec_avg_price_comparison WHERE match_status != 'MATCH';
 SELECT * FROM rec_reporting_view_comparison WHERE match_status != 'MATCH';
 ```
 
-## Pipeline Observability — Row-Count Reconciliation & Watermarks
+## Pipeline Observability, Row-Count Reconciliation & Watermarks
 
 Separate from the business-rule reconciliation above, `src/audit.py` runs a
-shallower, generic check at three points in every pipeline run — bronze
+shallower, generic check at three points in every pipeline run, bronze
 (`raw_listings`), silver (`stg_listings`), and the base gold fact table
-(`fct_listing_monthly_snapshot`) — comparing source vs target row counts and a
+(`fct_listing_monthly_snapshot`), comparing source vs target row counts and a
 portable SHA-256 checksum over the id set, logged to
 `metadata.row_count_reconciliation`. The staging checkpoint commonly shows
 `mismatched` by design (dedup + invalid-price exclusion legitimately drop
-rows) — the table records the delta for visibility, it isn't a pass/fail gate.
+rows), the table records the delta for visibility, it isn't a pass/fail gate.
 
 Every successfully loaded table also updates `metadata.watermark_control`
-(`last_successful_load_timestamp`, `last_run_id`) — bookkeeping on "when was
+(`last_successful_load_timestamp`, `last_run_id`), bookkeeping on "when was
 this table last fully loaded," not a resumable-extraction cursor, since the
 pipeline ingests whole files per `(city, snapshot_month)` upload rather than a
 continuously-queryable growing source.
@@ -311,38 +311,38 @@ IP address, user-agent, best-effort city/country (`ip-api.com`), whether the
 session ran the ETL pipeline, and a page-view count. Logged once per browser
 session (guarded by `st.session_state` in `app.py`, which reruns on every
 widget interaction/page switch). IP-based geolocation is best-effort and can
-be empty or wrong — Streamlit Cloud's proxy layer doesn't always expose a
-clean client IP — failures are silent and never block the dashboard.
+be empty or wrong, Streamlit Cloud's proxy layer doesn't always expose a
+clean client IP, failures are silent and never block the dashboard.
 
 ```sql
 SELECT COUNT(*) AS total_visits, SUM(ran_pipeline) AS visits_that_ran_etl
 FROM visitor_log;
 ```
 
-## Data Fetcher — Automatic City Discovery
+## Data Fetcher, Automatic City Discovery
 
 The platform includes a built-in data fetcher (`src/data_fetcher.py`) that can automatically download listing data from [Inside Airbnb](https://insideairbnb.com/get-the-data/).
 
 **Strategy (2-tier discovery):**
 
-1. **Live scrape** — parses `insideairbnb.com/get-the-data/` for download links. Works when the page serves static HTML.
-2. **Built-in catalog fallback** — since the page is a React SPA (JavaScript-rendered), the live scrape may return no results. The catalog contains **100 cities across 30+ countries** with their exact `data.insideairbnb.com` URL path components. When a city is selected, the fetcher sends HEAD requests to probe for the latest available snapshot date.
+1. **Live scrape**, parses `insideairbnb.com/get-the-data/` for download links. Works when the page serves static HTML.
+2. **Built-in catalog fallback**, since the page is a React SPA (JavaScript-rendered), the live scrape may return no results. The catalog contains **100 cities across 30+ countries** with their exact `data.insideairbnb.com` URL path components. When a city is selected, the fetcher sends HEAD requests to probe for the latest available snapshot date.
 
 ### Catalog Coverage
 
 | Region | Cities |
 |--------|--------|
-| United States | 32 — New York, Los Angeles, San Francisco, Chicago, Seattle, Austin, Denver, Nashville, Boston, Washington D.C., and more |
-| Canada | 8 — Toronto, Montreal, Vancouver, Ottawa, Quebec City, Victoria, New Brunswick, Winnipeg |
-| United Kingdom | 5 — London, Manchester, Bristol, Edinburgh, Glasgow |
-| Spain | 9 — Barcelona, Madrid, Mallorca, Valencia, Sevilla, Malaga, Girona, Menorca, Basque Country |
-| Italy | 10 — Rome, Milan, Florence, Venice, Naples, Bologna, Sicily, Sardinia, Puglia, Bergamo |
-| France | 3 — Paris, Lyon, Bordeaux |
-| Germany | 2 — Berlin, Munich |
-| Netherlands | 1 — Amsterdam |
-| Portugal | 2 — Lisbon, Porto |
-| Greece | 4 — Athens, Crete, Thessaloniki, South Aegean |
-| Australia | 6 — Sydney, Melbourne, Tasmania, Northern Rivers, Barossa Valley, Western Australia |
+| United States | 32, New York, Los Angeles, San Francisco, Chicago, Seattle, Austin, Denver, Nashville, Boston, Washington D.C., and more |
+| Canada | 8, Toronto, Montreal, Vancouver, Ottawa, Quebec City, Victoria, New Brunswick, Winnipeg |
+| United Kingdom | 5, London, Manchester, Bristol, Edinburgh, Glasgow |
+| Spain | 9, Barcelona, Madrid, Mallorca, Valencia, Sevilla, Malaga, Girona, Menorca, Basque Country |
+| Italy | 10, Rome, Milan, Florence, Venice, Naples, Bologna, Sicily, Sardinia, Puglia, Bergamo |
+| France | 3, Paris, Lyon, Bordeaux |
+| Germany | 2, Berlin, Munich |
+| Netherlands | 1, Amsterdam |
+| Portugal | 2, Lisbon, Porto |
+| Greece | 4, Athens, Crete, Thessaloniki, South Aegean |
+| Australia | 6, Sydney, Melbourne, Tasmania, Northern Rivers, Barossa Valley, Western Australia |
 | Other | Ireland, Belgium, Austria, Switzerland, Denmark, Sweden, Norway, Czech Republic, Turkey, New Zealand, Japan, China, Thailand, Singapore, South Africa, Mexico, Brazil, Argentina, Colombia, Cuba |
 
 ### CLI Usage
@@ -380,7 +380,7 @@ When running with `-v`, each test line shows `PASSED` / `FAILED`; the final line
 
 ```
 ModularSnapshotETL/
-├── main.py                # Entry point — creates ModularSnapshotETL.db, discovers cities, runs pipeline
+├── main.py                # Entry point, creates ModularSnapshotETL.db, discovers cities, runs pipeline
 ├── app.py                 # Streamlit dashboard entry point
 ├── crontab                # Schedule definition for the orchestrator
 ├── requirements.txt       # Python dependencies
@@ -463,7 +463,7 @@ Each notification email includes:
 - **Start and end timestamps**
 - **Cities processed** and **cities failed**
 - **Row counts** per table layer
-- **Reconciliation summary** — match/mismatch counts across all 3 rec tables, with specific mismatch details when issues are detected
+- **Reconciliation summary**, match/mismatch counts across all 3 rec tables, with specific mismatch details when issues are detected
 - **Detailed errors and warnings** from `pipeline_error_log`
 
 ## Scheduling

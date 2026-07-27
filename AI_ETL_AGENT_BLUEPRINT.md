@@ -1,6 +1,6 @@
 # AI ETL Agent Blueprint (Built on `ModularSnapshotETL`)
 
-Yes—this is absolutely possible.
+Yes, this is absolutely possible.
 
 Your current project already has the right building blocks (staging, dimensions/facts, reconciliation tests, and dashboard layer). The best approach is to evolve it into a **multi-step AI workflow** that generates ETL code with guardrails instead of trying to do everything in one LLM prompt.
 

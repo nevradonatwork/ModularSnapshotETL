@@ -1,4 +1,4 @@
-"""Page 5 — About this project."""
+"""Page 5, About this project."""
 
 import streamlit as st
 
@@ -7,7 +7,7 @@ st.caption("A monthly Airbnb pricing intelligence pipeline, end to end.")
 
 st.markdown("""
 ModularSnapshotETL turns [Inside Airbnb](https://insideairbnb.com/get-the-data/)'s
-monthly listing exports — 100+ cities, refreshed every month — into a queryable
+monthly listing exports, 100+ cities, refreshed every month, into a queryable
 pricing warehouse. Pick a city, pull the latest snapshot, and the pipeline
 cleans it, models it with history, cross-checks its own output, and hands it
 to a dashboard: neighbourhood pricing, the listings furthest above and below
@@ -22,14 +22,14 @@ st.divider()
 st.header("Why I Built It")
 st.markdown("""
 I wanted a project that shows real data engineering practice, not a toy
-example — proper layering, slowly-changing dimensions, idempotent reruns,
+example, proper layering, slowly-changing dimensions, idempotent reruns,
 reconciliation against its own output, and an actual production database, not
 a script that dumps a CSV into a table and calls it done.
 
 Inside Airbnb publishes a rolling monthly export for over a hundred cities,
 which gave me a real problem to solve: how do you turn a recurring raw
-export into an audited, queryable warehouse — month after month, city after
-city — without duplicating data, losing history, or silently dropping rows
+export into an audited, queryable warehouse, month after month, city after
+city, without duplicating data, losing history, or silently dropping rows
 when something upstream changes.
 """)
 
@@ -37,14 +37,15 @@ st.divider()
 
 st.header("How It's Built")
 st.markdown("""
-The pipeline is Python and pandas underneath — no Airflow, no Spark, no ORM.
-Each month's export lands in a **bronze** layer, untouched and append-only.
-It's cleaned, deduplicated, and geo-validated into **silver**. From there it's
-modelled into **gold**: conformed dimensions — including SCD Type 2 history
-for hosts and listings, so a changed attribute doesn't erase what it used to
-be — and fact tables at the listing/month/city grain. A **metadata** layer
-tracks every run, reconciles row counts and checksums between layers, and
-keeps a watermark of the last successful load per table.
+The pipeline is Python and pandas underneath, no Airflow, no Spark, no ORM.
+It follows a **medallion architecture**: each month's export lands in a
+**bronze** layer, untouched and append-only. It's cleaned, deduplicated, and
+geo-validated into **silver**. From there it's modelled into **gold**:
+conformed dimensions, including SCD Type 2 history for hosts and listings, so
+a changed attribute doesn't erase what it used to be, and fact tables at the
+listing/month/city grain. A **metadata** layer tracks every run, reconciles
+row counts and checksums between layers, and keeps a watermark of the last
+successful load per table.
 
 Postgres ([Neon](https://neon.tech)) backs the live dashboard so data
 persists between restarts; the exact same code runs on SQLite locally and in
@@ -57,18 +58,18 @@ st.divider()
 # Pipeline stages
 # ---------------------------------------------------------------------------
 st.header("How the Pipeline Works")
-st.caption("Five stages — from a raw monthly export to an interactive dashboard.")
+st.caption("Five stages, from a raw monthly export to an interactive dashboard.")
 
 stages = [
     ("01", "Ingestion", "A city's `listings.csv.gz` is fetched from Inside Airbnb "
-     "(built-in scraper, or manual upload) and landed in the bronze layer — "
+     "(built-in scraper, or manual upload) and landed in the bronze layer, "
      "untouched, append-only, auditable. Nothing is cleaned or interpreted yet."),
     ("02", "Staging & Normalisation", "Listings are cleaned and deduplicated by "
      "`(city, snapshot_month, id)`, prices parsed out of display strings, and "
      "coordinates checked against each city's geographic bounding box. Rows "
      "outside it are flagged, never silently dropped."),
     ("03", "Dimensional Modelling", "Conformed dimensions for date, city, and "
-     "neighbourhood, plus SCD Type 2 dimensions for hosts and listings — so "
+     "neighbourhood, plus SCD Type 2 dimensions for hosts and listings, so "
      "the pipeline knows exactly when a host's response rate or a listing's "
      "room type changed, not just what it is today."),
     ("04", "Reconciliation & Audit", "Independently recomputed values are "
@@ -77,7 +78,7 @@ stages = [
      "mismatch shows up in a table, not as a support ticket."),
     ("05", "Interactive Dashboard", "A Streamlit + Plotly dashboard surfaces "
      "neighbourhood pricing, the listings furthest above and below their "
-     "neighbourhood average, and a monthly compliance snapshot — for every "
+     "neighbourhood average, and a monthly compliance snapshot, for every "
      "city that's been loaded."),
 ]
 
@@ -118,7 +119,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 # About the author
 # ---------------------------------------------------------------------------
-st.header("About Me")
+st.header("Nevra Donat")
 
 st.markdown("""
 I've been working in technology for over 20 years across different roles in

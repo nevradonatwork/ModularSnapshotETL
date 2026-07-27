@@ -84,7 +84,7 @@ def load_staging(
     df, invalid_price_count = _clean(df)
     df = _deduplicate(df)
 
-    # Geo validation — flag rows outside city bounding box
+    # Geo validation, flag rows outside city bounding box
     df, geo_flagged_count = geo_flag_out_of_city(df, city)
 
     now = datetime.now(timezone.utc).isoformat()
@@ -120,10 +120,10 @@ def _clean(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     """
     df = df.copy()
 
-    # Parse price — strip $ and commas, convert to float
+    # Parse price, strip $ and commas, convert to float
     df["price_amount"] = _parse_price(df.get("price", pd.Series(dtype=str)))
 
-    # Exclude rows with null or zero price — no synthetic estimation
+    # Exclude rows with null or zero price, no synthetic estimation
     invalid_price = df["price_amount"].isna() | (df["price_amount"] <= 0)
     invalid_count = int(invalid_price.sum())
     if invalid_count > 0:

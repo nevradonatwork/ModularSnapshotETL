@@ -232,7 +232,7 @@ def run(
         compliance_count = load_fct_data_compliance_monthly(conn, city_key, month_key)
         row_counts["fct_data_compliance_monthly"] = compliance_count
 
-        # Step 9: Reconciliation — compare staging vs fact tables vs views
+        # Step 9: Reconciliation, compare staging vs fact tables vs views
         rec_avg = reconcile_avg_price(conn, city_key, month_key)
         row_counts["rec_avg_price_comparison"] = rec_avg
 
@@ -248,7 +248,7 @@ def run(
         return row_counts
 
     except Exception as e:
-        # Roll back the failed statement's transaction first — on Postgres,
+        # Roll back the failed statement's transaction first, on Postgres,
         # a connection stays unusable for further writes until this happens.
         conn.rollback()
         etl_logging.log_error(conn, run_id, type(e).__name__, str(e))

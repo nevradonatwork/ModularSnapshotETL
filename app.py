@@ -1,4 +1,4 @@
-"""ModularSnapshotETL Dashboard — Streamlit entry point."""
+"""ModularSnapshotETL Dashboard, Streamlit entry point."""
 
 import streamlit as st
 

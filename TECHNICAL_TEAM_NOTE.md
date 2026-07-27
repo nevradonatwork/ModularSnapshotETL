@@ -1,4 +1,4 @@
-# ModularSnapshotETL — Technical Team Note
+# ModularSnapshotETL, Technical Team Note
 
 Repository: https://github.com/nevradonatwork/ModularSnapshotETL  
 Live demo dashboard: https://modularsnapshotetl.streamlit.app/  

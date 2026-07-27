@@ -1,4 +1,4 @@
-"""Page 1 — Home / Project Overview."""
+"""Page 1, Home / Project Overview."""
 
 import streamlit as st
 
@@ -8,8 +8,8 @@ import streamlit as st
 st.title("ModularSnapshotETL")
 st.markdown(
     "A monthly Airbnb pricing intelligence platform. Listing snapshots for "
-    "100+ cities flow through a bronze/silver/gold pipeline — cleaned, "
-    "deduplicated, and modelled with history — into a dashboard that surfaces "
+    "100+ cities flow through a bronze/silver/gold pipeline, cleaned, "
+    "deduplicated, and modelled with history, into a dashboard that surfaces "
     "neighbourhood pricing, over/underpriced listings, and data quality, "
     "month over month."
 )
@@ -41,6 +41,6 @@ with c2:
     st.caption("Top 10 listings furthest above and below their neighbourhood average.")
 with c3:
     st.markdown("**Data Compliance**")
-    st.caption("A quality snapshot per city — missing prices, neighbourhoods, room types.")
+    st.caption("A quality snapshot per city, missing prices, neighbourhoods, room types.")
 
 st.caption("Curious how it's built? See the **About** page for the full pipeline walkthrough.")
