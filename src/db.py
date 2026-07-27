@@ -172,7 +172,7 @@ def get_connection(sqlite_path: str = DEFAULT_SQLITE_PATH):
 
 
 def read_sql(conn, sql, params=None) -> pd.DataFrame:
-    """Run a query and return a DataFrame — portable across sqlite3/Postgres."""
+    """Run a query and return a DataFrame, portable across sqlite3/Postgres."""
     cur = conn.cursor()
     cur.execute(sql, params or ())
     cols = [d[0] for d in cur.description]
@@ -191,7 +191,7 @@ def _rows_for_insert(df: pd.DataFrame) -> list:
 
 
 def bulk_insert(conn, table: str, df: pd.DataFrame) -> None:
-    """Append DataFrame rows into `table` — portable across sqlite3/Postgres."""
+    """Append DataFrame rows into `table`, portable across sqlite3/Postgres."""
     if df.empty:
         return
 
@@ -245,7 +245,7 @@ def bulk_upsert(conn, table: str, df: pd.DataFrame, conflict_cols: list) -> None
 def bulk_insert_returning(conn, table: str, df: pd.DataFrame, returning_cols: list) -> list:
     """Bulk INSERT with RETURNING, returning a list of result tuples.
 
-    Postgres only (uses psycopg2's execute_values fetch mode) — callers
+    Postgres only (uses psycopg2's execute_values fetch mode), callers
     on SQLite should insert row-by-row instead, since that's already fast
     without network round trips.
     """
@@ -265,7 +265,7 @@ def bulk_insert_returning(conn, table: str, df: pd.DataFrame, returning_cols: li
 
 
 def table_columns(conn, table_name: str) -> set:
-    """Return the set of column names for a table — portable across sqlite3/Postgres."""
+    """Return the set of column names for a table, portable across sqlite3/Postgres."""
     if is_postgres(conn):
         # Scope to schemas on the current search_path, so this can't return
         # columns from an unrelated same-named table in a different schema.

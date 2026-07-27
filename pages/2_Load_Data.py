@@ -1,4 +1,4 @@
-"""Page 2 — Data Load + Run History."""
+"""Page 2, Data Load + Run History."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def _load_live_data() -> tuple[list[tuple[str, str]], dict]:
 
 
 # ---------------------------------------------------------------------------
-# Page Header — Data Source Explanation
+# Page Header, Data Source Explanation
 # ---------------------------------------------------------------------------
 st.title("Load Data")
 
@@ -80,7 +80,7 @@ ModularSnapshotETL pipeline. Once processed, the dashboard will display:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# City Selection — Searchable Dropdown
+# City Selection, Searchable Dropdown
 # ---------------------------------------------------------------------------
 st.header("Select City")
 
@@ -98,7 +98,7 @@ selected_label = st.selectbox(
 city_slug = slug_by_label.get(selected_label, "") if selected_label else ""
 
 if selected_label:
-    st.caption(f"City slug: `{city_slug}` — will download from data.insideairbnb.com")
+    st.caption(f"City slug: `{city_slug}`, will download from data.insideairbnb.com")
 
 st.divider()
 
@@ -252,7 +252,7 @@ try:
         selected_run = st.selectbox(
             "Select a run to view details",
             runs["run_id"].tolist(),
-            format_func=lambda rid: f"Run #{rid} — {runs.loc[runs['run_id'] == rid, 'city'].values[0]} ({runs.loc[runs['run_id'] == rid, 'status'].values[0]})",
+            format_func=lambda rid: f"Run #{rid}, {runs.loc[runs['run_id'] == rid, 'city'].values[0]} ({runs.loc[runs['run_id'] == rid, 'status'].values[0]})",
         )
 
         if selected_run:

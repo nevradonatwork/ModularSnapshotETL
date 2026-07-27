@@ -1,4 +1,4 @@
-"""Tests for the email notification module — reconciliation summary."""
+"""Tests for the email notification module, reconciliation summary."""
 import json
 from unittest.mock import patch
 
@@ -130,7 +130,7 @@ class TestBuildEmailBodyReconciliation:
             "avg_price": {"total": 5, "match": 3, "mismatch": 2, "stg_only": 0, "fct_only": 0},
             "top10_delta": {"total": 10, "match": 10, "mismatch": 0, "stg_only": 0, "fct_only": 0},
             "views": {"total": 4, "match": 4, "mismatch": 0},
-            "mismatches": ["Avg price: new-york/Harlem (ALL) — stg=75.5, fct=100.0, diff=-24.5"],
+            "mismatches": ["Avg price: new-york/Harlem (ALL), stg=75.5, fct=100.0, diff=-24.5"],
         }
         body = _build_email_body(self._make_run_info(), [], ["new-york"], [], rec)
 

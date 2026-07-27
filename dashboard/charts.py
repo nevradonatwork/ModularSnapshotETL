@@ -40,7 +40,7 @@ def top10_price_comparison_bar(df: pd.DataFrame, delta_type: str):
         y=["price_amount", "neighbourhood_avg_price"],
         barmode="group",
         hover_data=["neighbourhood", "room_type", "price_delta_pct"],
-        title=f"Top 10 {label} Listings — Price vs Neighbourhood Avg",
+        title=f"Top 10 {label} Listings, Price vs Neighbourhood Avg",
         labels={"value": "Price ($)", "listing_label": "Listing ID"},
     )
     fig.update_layout(xaxis_tickangle=-45)

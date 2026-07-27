@@ -6,7 +6,7 @@ Please share the note below with the technical reviewers.
 
 ---
 
-## Subject: Technical Review Package — ModularSnapshotETL
+## Subject: Technical Review Package, ModularSnapshotETL
 
 Hello Team,
 

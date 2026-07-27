@@ -1,4 +1,4 @@
-"""Page 4 — Data Dictionary & Quality Rules."""
+"""Page 4, Data Dictionary & Quality Rules."""
 
 import pandas as pd
 import streamlit as st
@@ -55,8 +55,8 @@ listings.csv.gz
   -> raw_listings (append-only, immutable)
     -> stg_listings (cleansed, deduped, geo-flagged)
       -> dim_date, dim_city, dim_neighbourhood
-      -> dim_host (SCD Type 2 — tracks attribute changes)
-      -> dim_listing (SCD Type 2 — tracks attribute changes)
+      -> dim_host (SCD Type 2, tracks attribute changes)
+      -> dim_listing (SCD Type 2, tracks attribute changes)
       -> fct_listing_monthly_snapshot (base fact, geo-flagged excluded)
         -> fct_neighbourhood_monthly_avg_price (per room_type + ALL)
         -> fct_neighbourhood_monthly_top10_price_delta (OVERPRICED / UNDERPRICED)
@@ -75,7 +75,7 @@ st.divider()
 st.header("Database Layers")
 
 layers = {
-    "Raw (`raw_`)": "Immutable landing storage. Source data exactly as received, with tracking metadata. Append-only — rerunning adds a new copy for full audit trail.",
+    "Raw (`raw_`)": "Immutable landing storage. Source data exactly as received, with tracking metadata. Append-only, rerunning adds a new copy for full audit trail.",
     "Staging (`stg_`)": "Cleansed, standardised, and deduplicated data. Prices parsed to numeric, booleans normalised (t/f to 1/0), geo validation applied. Deduplicated by (city, snapshot_month, id).",
     "Dimension (`dim_`)": "Conformed dimensions: date, city, neighbourhood, host, listing. Hosts and listings use SCD Type 2 (track attribute changes over time with valid_from/valid_to).",
     "Fact (`fct_`)": "Analytical fact tables at listing + month + city grain. Neighbourhood averages broken down by room type + combined 'ALL'. Top-10 over/underpriced per neighbourhood. Compliance counts.",

@@ -1,4 +1,4 @@
-"""Page 3 — Interactive Dashboard (4 reporting views)."""
+"""Page 3, Interactive Dashboard (4 reporting views)."""
 
 import os
 import sys
@@ -65,7 +65,7 @@ def _prepare_top10_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     out = df.copy()
-    # Preserve listing_id precision — cast to string
+    # Preserve listing_id precision, cast to string
     out["listing_id"] = out["listing_id"].astype(object).astype(str)
     # Construct listing URL from id
     out["listing_url"] = "https://www.airbnb.com/rooms/" + out["listing_id"]

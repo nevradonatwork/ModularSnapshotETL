@@ -1,4 +1,4 @@
-# ModularSnapshotETL — Web Dashboard Developer Plan
+# ModularSnapshotETL, Web Dashboard Developer Plan
 
 ## Goal
 
@@ -20,14 +20,14 @@ The app must be good enough to use as a live demo in interviews.
 |-------|--------|-----------|
 | **Framework** | **Streamlit** | Fastest path to a polished, interactive web app. No separate frontend build. Native charts, tables, progress bars, sidebar filters, and file uploader. |
 | **Charts** | **Plotly** (via `plotly.express`) | Interactive hover, zoom, click. Seamless Streamlit integration via `st.plotly_chart`. |
-| **Backend** | Existing Python modules (`src/pipeline.py`, `src/ingestion.py`, etc.) | No new API layer needed — Streamlit calls Python functions directly. |
+| **Backend** | Existing Python modules (`src/pipeline.py`, `src/ingestion.py`, etc.) | No new API layer needed, Streamlit calls Python functions directly. |
 | **Database** | Existing `ModularSnapshotETL.db` (SQLite) | Already produced by the pipeline. Read with `sqlite3` + `pandas`. |
 | **New dependencies** | `streamlit`, `plotly` | Add to `requirements.txt`. |
 
 ### Why Streamlit over React
 
-- Zero build tooling — `streamlit run app.py` and it works.
-- Native Python — reuses every existing module directly.
+- Zero build tooling, `streamlit run app.py` and it works.
+- Native Python, reuses every existing module directly.
 - Sidebar filters, file upload, progress bars, tabs, and modal-style expanders are built-in.
 - Interview demo: open laptop, run one command, show the app.
 - Looks professional enough for a data engineering showcase.
@@ -71,7 +71,7 @@ No changes to any `src/` or `tests/` files.
 
 ---
 
-### Page 1 — Home / Project Overview (`pages/1_Home.py`)
+### Page 1, Home / Project Overview (`pages/1_Home.py`)
 
 **Purpose:** Interview-friendly explanation of the project.
 
@@ -92,7 +92,7 @@ No changes to any `src/` or `tests/` files.
      - **Staging**: Cleansed, deduplicated, geo-validated
      - **Dimensions**: Conformed dims with SCD2 history (host, listing)
      - **Facts**: Monthly snapshots, neighbourhood averages, top-10 deltas, compliance
-     - **Views**: BI-ready reporting — 4 views ready for dashboards
+     - **Views**: BI-ready reporting, 4 views ready for dashboards
 
 3. **What the Pipeline Produces**
    - Bullet list (use `st.markdown`):
@@ -116,7 +116,7 @@ No changes to any `src/` or `tests/` files.
 
 ---
 
-### Page 2 — Data Load (`pages/2_Load_Data.py`)
+### Page 2, Data Load (`pages/2_Load_Data.py`)
 
 **Purpose:** Let users ingest a city dataset and run the pipeline.
 
@@ -134,9 +134,9 @@ Two sections stacked vertically: **Data Load Form** on top, **Run Status** below
 
 **Source method options:**
 
-1. **Upload file** — `st.file_uploader(type=["csv.gz", "gz"])`. Save uploaded file to `dataset/<city>/listings.csv.gz`, creating the directory if needed.
-2. **Paste URL** — `st.text_input("URL to listings.csv.gz")`. Download with `urllib.request.urlretrieve` or `requests.get` to `dataset/<city>/listings.csv.gz`.
-3. **Pick from Inside Airbnb** — Show a curated list of cities/URLs scraped or hard-coded from `https://insideairbnb.com/get-the-data/`. User selects from a `st.selectbox`. On select, auto-fill city name and URL.
+1. **Upload file**, `st.file_uploader(type=["csv.gz", "gz"])`. Save uploaded file to `dataset/<city>/listings.csv.gz`, creating the directory if needed.
+2. **Paste URL**, `st.text_input("URL to listings.csv.gz")`. Download with `urllib.request.urlretrieve` or `requests.get` to `dataset/<city>/listings.csv.gz`.
+3. **Pick from Inside Airbnb**, Show a curated list of cities/URLs scraped or hard-coded from `https://insideairbnb.com/get-the-data/`. User selects from a `st.selectbox`. On select, auto-fill city name and URL.
 
 **Pre-flight validation** (before running pipeline):
 
@@ -165,7 +165,7 @@ The function should:
 3. Call `pipeline.run(conn, dataset_path, city)`.
 4. Return the `row_counts` dict and run status.
 
-Display progress steps as they complete (approximate — the pipeline runs as one call, so show a `st.status` expander that updates):
+Display progress steps as they complete (approximate, the pipeline runs as one call, so show a `st.status` expander that updates):
 
 | Step | Label |
 |------|-------|
@@ -177,7 +177,7 @@ Display progress steps as they complete (approximate — the pipeline runs as on
 | 6 | Running reconciliation... |
 | 7 | Done |
 
-**Note:** Since `pipeline.run()` is a single function call, the simplest approach is to show a spinner during execution and display detailed results afterward. If finer-grained progress is desired in the future, `pipeline.run()` could be refactored to accept a callback — but that is out of scope for this plan. Do not modify `src/pipeline.py`.
+**Note:** Since `pipeline.run()` is a single function call, the simplest approach is to show a spinner during execution and display detailed results afterward. If finer-grained progress is desired in the future, `pipeline.run()` could be refactored to accept a callback, but that is out of scope for this plan. Do not modify `src/pipeline.py`.
 
 #### C) Run Status Card (after pipeline completes)
 
@@ -211,7 +211,7 @@ Below the run status, show a collapsible `st.expander("Run History")`:
 
 ---
 
-### Page 3 — Dashboard (`pages/3_Dashboard.py`)
+### Page 3, Dashboard (`pages/3_Dashboard.py`)
 
 **Purpose:** Visualise the 4 reporting views interactively.
 
@@ -234,7 +234,7 @@ All filters are rendered in `st.sidebar` and applied to every query on this page
 |--------|--------|--------------|
 | City | `st.selectbox` | `SELECT DISTINCT city_name FROM dim_city WHERE is_active = 1` |
 | Snapshot month | `st.selectbox` | `SELECT DISTINCT month_start_date FROM dim_date d JOIN fct_listing_monthly_snapshot f ON d.month_key = f.month_key ORDER BY month_start_date DESC` |
-| Room type | `st.selectbox` | `['ALL', 'Entire home/apt', 'Private room', 'Shared room', 'Hotel room']` — hard-coded list + "ALL" |
+| Room type | `st.selectbox` | `['ALL', 'Entire home/apt', 'Private room', 'Shared room', 'Hotel room']`, hard-coded list + "ALL" |
 | Neighbourhood | `st.multiselect` (optional) | `SELECT DISTINCT neighbourhood FROM vw_rep_monthly_neighbourhood_avg_price WHERE city_name = ? AND month_start_date = ?` |
 
 All view queries use `WHERE city_name = ? AND month_start_date = ?` plus optional `room_type` and `neighbourhood` filters.
@@ -290,7 +290,7 @@ WHERE  city_name = :city
 ORDER BY price_delta DESC
 ```
 
-**Chart:** Plotly `px.bar` — grouped bar showing `price_amount` vs `neighbourhood_avg_price` per listing, colored by delta direction.
+**Chart:** Plotly `px.bar`, grouped bar showing `price_amount` vs `neighbourhood_avg_price` per listing, colored by delta direction.
 
 **Table:** `st.dataframe` with columns:
 - `rank_in_neighbourhood`
@@ -361,7 +361,7 @@ WHERE  error_type = 'GEO_OUT_OF_CITY'
 
 ---
 
-### Page 4 — Data Dictionary (`pages/4_Data_Dictionary.py`)
+### Page 4, Data Dictionary (`pages/4_Data_Dictionary.py`)
 
 **Purpose:** Explain every column, layer, type, and validation rule.
 
@@ -404,7 +404,7 @@ Render as `st.dataframe` with search/filter. Columns:
 - notes
 
 Cover all key columns from:
-- `stg_listings` (45 columns — the main working set)
+- `stg_listings` (45 columns, the main working set)
 - `dim_*` tables (key columns)
 - `fct_*` tables (measures)
 - `vw_rep_*` views (output columns)
@@ -459,7 +459,7 @@ listings.csv.gz
 
 ## Shared Modules
 
-### `dashboard/db.py` — Database Connection Helper
+### `dashboard/db.py`, Database Connection Helper
 
 ```python
 import sqlite3
@@ -494,7 +494,7 @@ def db_exists() -> bool:
         return False
 ```
 
-### `dashboard/filters.py` — Sidebar Filters
+### `dashboard/filters.py`, Sidebar Filters
 
 ```python
 import streamlit as st
@@ -539,7 +539,7 @@ def render_filters() -> dict:
     }
 ```
 
-### `dashboard/charts.py` — Plotly Chart Builders
+### `dashboard/charts.py`, Plotly Chart Builders
 
 One function per chart type. Each takes a DataFrame and returns a Plotly figure.
 
@@ -591,7 +591,7 @@ def compliance_trend_line(df):
 
 ---
 
-## `app.py` — Entry Point
+## `app.py`, Entry Point
 
 ```python
 import streamlit as st
@@ -706,14 +706,14 @@ plotly>=5.18.0
 |------|------|-----------------|
 | 1 | Create `dashboard/` package: `db.py`, `constants.py`, `__init__.py` | Small |
 | 2 | Create `app.py` with page config | Small |
-| 3 | Build **Page 1 — Home** | Medium |
+| 3 | Build **Page 1, Home** | Medium |
 | 4 | Build `dashboard/pipeline_runner.py` | Medium |
-| 5 | Build **Page 2 — Data Load** (upload + URL + pipeline run + status) | Large |
+| 5 | Build **Page 2, Data Load** (upload + URL + pipeline run + status) | Large |
 | 6 | Build `dashboard/filters.py` | Small |
 | 7 | Build `dashboard/charts.py` | Medium |
-| 8 | Build **Page 3 — Dashboard** (4 tabs with charts + tables + detail) | Large |
+| 8 | Build **Page 3, Dashboard** (4 tabs with charts + tables + detail) | Large |
 | 9 | Build `dashboard/data_dictionary.py` definitions | Medium |
-| 10 | Build **Page 4 — Data Dictionary** | Medium |
+| 10 | Build **Page 4, Data Dictionary** | Medium |
 | 11 | Add Run History panel to Page 2 | Small |
 | 12 | Add Reconciliation summary to Page 3 | Small |
 | 13 | Update `requirements.txt` and `.gitignore` | Small |

@@ -117,7 +117,7 @@ def geo_flag_out_of_city(df: pd.DataFrame, city: str) -> tuple[pd.DataFrame, int
     """Flag rows whose lat/long falls outside the city bounding box.
 
     Adds or updates a ``geo_out_of_city_flag`` column (0 = inside, 1 = outside).
-    Rows are kept in the DataFrame — never deleted.
+    Rows are kept in the DataFrame, never deleted.
 
     Args:
         df: Staging DataFrame with ``latitude`` and ``longitude`` columns.

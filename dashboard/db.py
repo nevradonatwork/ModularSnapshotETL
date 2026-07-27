@@ -13,7 +13,7 @@ def get_connection():
     """Return a shared database connection (cached across reruns).
 
     Uses Postgres (Neon) when DATABASE_URL is configured, else a local
-    SQLite file — see src/db.py. Ensures the schema exists so a fresh/empty
+    SQLite file, see src/db.py. Ensures the schema exists so a fresh/empty
     database doesn't look like a broken connection.
     """
     conn = db.get_connection(DB_PATH)
@@ -22,7 +22,7 @@ def get_connection():
 
 
 def get_fresh_connection():
-    """Return a new (uncached) connection — used after pipeline writes."""
+    """Return a new (uncached) connection, used after pipeline writes."""
     return db.get_connection(DB_PATH)
 
 
@@ -56,7 +56,7 @@ def db_has_data() -> bool:
 
     Retries once with a fresh connection if the cached one has gone stale.
     Raises if it still fails, so callers can distinguish "genuinely empty"
-    from "can't reach the database" — the previous version swallowed all
+    from "can't reach the database", the previous version swallowed all
     errors and showed the same "no data" message for both.
     """
     try:

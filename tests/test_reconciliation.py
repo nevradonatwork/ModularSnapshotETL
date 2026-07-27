@@ -64,7 +64,7 @@ class TestReconcileAvgPrice:
         month_key, city_key = _load_full_pipeline(db_conn, sample_csv)
 
         # Tamper with a fact table avg_price (use subquery for cross-platform
-        # SQLite compat — UPDATE...LIMIT requires SQLITE_ENABLE_UPDATE_DELETE_LIMIT)
+        # SQLite compat, UPDATE...LIMIT requires SQLITE_ENABLE_UPDATE_DELETE_LIMIT)
         row_id = db_conn.execute(
             """SELECT id FROM fct_neighbourhood_monthly_avg_price
                WHERE room_type = 'ALL'

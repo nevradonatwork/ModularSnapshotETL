@@ -108,7 +108,7 @@ class TestLoadStaging:
         assert excluded == 1  # the null price row
 
     def test_geo_flag_stored_in_staging(self, db_conn, sample_csv):
-        """All sample rows are within new-york bounding box — flag should be 0."""
+        """All sample rows are within new-york bounding box, flag should be 0."""
         load_raw(db_conn, sample_csv, "new-york", "2025-01-01", 0)
         count, _, geo_flagged = load_staging(db_conn, "new-york", "2025-01-01")
         assert count == 3

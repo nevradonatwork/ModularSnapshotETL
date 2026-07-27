@@ -5,11 +5,11 @@ Sends a summary email after each pipeline execution with run status,
 row counts, and error details from the ETL log tables.
 
 Configuration via environment variables:
-    ModularSnapshotETL_SMTP_HOST     — SMTP server hostname (default: smtp.gmail.com)
-    ModularSnapshotETL_SMTP_PORT     — SMTP server port (default: 587)
-    ModularSnapshotETL_SMTP_USER     — SMTP username / sender email (required)
-    ModularSnapshotETL_SMTP_PASSWORD — SMTP password or app password (required)
-    ModularSnapshotETL_NOTIFY_EMAIL  — Recipient email address (required)
+    ModularSnapshotETL_SMTP_HOST    , SMTP server hostname (default: smtp.gmail.com)
+    ModularSnapshotETL_SMTP_PORT    , SMTP server port (default: 587)
+    ModularSnapshotETL_SMTP_USER    , SMTP username / sender email (required)
+    ModularSnapshotETL_SMTP_PASSWORD, SMTP password or app password (required)
+    ModularSnapshotETL_NOTIFY_EMAIL , Recipient email address (required)
 """
 import json
 import logging
@@ -123,7 +123,7 @@ def _get_reconciliation_summary(conn: sqlite3.Connection) -> dict:
     ).fetchall()
     for city, nb, rt, stg_p, fct_p, diff in avg_mismatches:
         summary["mismatches"].append(
-            f"Avg price: {city}/{nb} ({rt}) — stg={stg_p}, fct={fct_p}, diff={diff}"
+            f"Avg price: {city}/{nb} ({rt}), stg={stg_p}, fct={fct_p}, diff={diff}"
         )
 
     view_mismatches = conn.execute(
@@ -134,7 +134,7 @@ def _get_reconciliation_summary(conn: sqlite3.Connection) -> dict:
     ).fetchall()
     for city, vn, fct_c, view_c, diff in view_mismatches:
         summary["mismatches"].append(
-            f"View count: {city}/{vn} — fct={fct_c}, view={view_c}, diff={diff}"
+            f"View count: {city}/{vn}, fct={fct_c}, view={view_c}, diff={diff}"
         )
 
     return summary
@@ -193,7 +193,7 @@ def _build_email_body(
         lines.append("")
 
     lines.append("--")
-    lines.append("ModularSnapshotETL Data Platform — Automated Notification")
+    lines.append("ModularSnapshotETL Data Platform, Automated Notification")
     return "\n".join(lines)
 
 
@@ -273,7 +273,7 @@ def send_run_notification(
     body = _build_email_body(run_info, errors, cities, failed, rec_summary)
 
     status = run_info["status"]
-    subject = f"ModularSnapshotETL Pipeline Run #{run_info['run_id']} — {status}"
+    subject = f"ModularSnapshotETL Pipeline Run #{run_info['run_id']}, {status}"
 
     msg = MIMEText(body)
     msg["Subject"] = subject

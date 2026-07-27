@@ -2,7 +2,7 @@
 Database schema for the ModularSnapshotETL data platform.
 
 Medallion architecture (Postgres schemas; SQLite has no schema separation
-and keeps every table in one flat namespace — see _q() below):
+and keeps every table in one flat namespace, see _q() below):
     bronze    – raw_, immutable landing storage
     silver    – stg_, cleansing and deduplication
     gold      – dim_/fct_/vw_rep_, conformed dimensions, facts, reporting views
@@ -20,8 +20,8 @@ _POSTGRES_PK = "SERIAL PRIMARY KEY"
 
 # Every table/view name is globally unique across schemas, so on Postgres
 # a connection's `search_path` (set once in db.PGConnection.__init__) lets
-# every *unqualified* reference elsewhere in the codebase — SELECT/INSERT/
-# UPDATE/DELETE, view bodies, FOREIGN KEY REFERENCES — resolve correctly
+# every *unqualified* reference elsewhere in the codebase, SELECT/INSERT/
+# UPDATE/DELETE, view bodies, FOREIGN KEY REFERENCES, resolve correctly
 # without any per-call-site changes. Only the DDL below, which actually
 # creates each object, needs to say which schema it belongs in.
 _SCHEMA_OF = {
@@ -406,7 +406,7 @@ def _create_staging_tables(cur, postgres: bool) -> None:
 
 
 # ------------------------------------------------------------------
-# Gold Layer — Dimensions
+# Gold Layer, Dimensions
 # ------------------------------------------------------------------
 
 def _create_dimension_tables(cur, postgres: bool) -> None:
@@ -501,7 +501,7 @@ def _create_dimension_tables(cur, postgres: bool) -> None:
 
 
 # ------------------------------------------------------------------
-# Gold Layer — Facts
+# Gold Layer, Facts
 # ------------------------------------------------------------------
 
 def _create_fact_tables(cur, postgres: bool) -> None:
@@ -587,7 +587,7 @@ def _create_fact_tables(cur, postgres: bool) -> None:
 
 
 # ------------------------------------------------------------------
-# Gold Layer — Reporting Views
+# Gold Layer, Reporting Views
 # ------------------------------------------------------------------
 
 def _create_presentation_views(cur, postgres: bool) -> None:
@@ -685,7 +685,7 @@ def _create_presentation_views(cur, postgres: bool) -> None:
 
 
 # ------------------------------------------------------------------
-# Metadata Layer — Business-Rule Reconciliation (data comparison / audit)
+# Metadata Layer, Business-Rule Reconciliation (data comparison / audit)
 # ------------------------------------------------------------------
 
 def _create_reconciliation_tables(cur, postgres: bool) -> None:

@@ -365,7 +365,7 @@ def load_dim_hosts(
         # which matters a lot once a city has thousands of unique hosts.
         mapping = _load_dim_hosts_batched(conn, hosts, available_cols, track_attrs, snapshot_month)
     else:
-        # SQLite is a local file — row-by-row has no network latency to pay.
+        # SQLite is a local file, row-by-row has no network latency to pay.
         mapping = _load_dim_hosts_row_by_row(conn, hosts, track_attrs, snapshot_month)
 
     conn.commit()

@@ -53,7 +53,7 @@ class CitySnapshot:
 
 
 # ---------------------------------------------------------------------------
-# Comprehensive city catalog — URL path components for data.insideairbnb.com
+# Comprehensive city catalog, URL path components for data.insideairbnb.com
 #
 # Format: (city_slug, country_path, region_path, city_path, label)
 # URL pattern: http://data.insideairbnb.com/{country}/{region}/{city}/{date}/...
@@ -393,7 +393,7 @@ def _scrape_live_page() -> list[CitySnapshot]:
 def _catalog_snapshots() -> list[CitySnapshot]:
     """Build snapshots from the built-in catalog without date probing.
 
-    Returns entries with placeholder date '0000-00-00' — the caller should
+    Returns entries with placeholder date '0000-00-00', the caller should
     use probe_catalog_city() or pass directly to fetch_city_data() which
     will probe on demand.
     """
@@ -435,7 +435,7 @@ def probe_catalog_city(slug: str) -> CitySnapshot | None:
 
 
 def discover_snapshots() -> list[CitySnapshot]:
-    """Discover available cities — live scrape first, catalog fallback.
+    """Discover available cities, live scrape first, catalog fallback.
 
     Returns a list of CitySnapshot objects. When falling back to catalog,
     snapshot dates are empty; use probe_catalog_city() for a specific city.
@@ -608,7 +608,7 @@ def main():
             print(f"  {ftype}: {path}")
         return
 
-    # Interactive mode — show catalog
+    # Interactive mode, show catalog
     print(f"\n{len(CITY_CATALOG)} cities available:\n")
     sorted_catalog = sorted(CITY_CATALOG, key=lambda c: c[0])
     for i, (slug, country, region, city, label) in enumerate(sorted_catalog, 1):
