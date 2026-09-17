@@ -1,4 +1,4 @@
-# Nevra's Perfect ETL — Standing Checklist
+# Nevra's Perfect ETL, Standing Checklist
 
 A general checklist to apply on every future ETL build, independent of the
 specific project or database engine. Established from real lessons across ETL
@@ -16,7 +16,7 @@ work (including the Vax GA4 pipeline); recorded here for reuse.
 - Every bronze, history, and gold table should carry `etl_processed_at`
   (TIMESTAMP, nullable) and `etl_run_id` (STRING, nullable) columns, so the
   origin and processing time of any row can always be traced end to end. Not
-  just on bronze — extend to history and gold on every future build.
+  just on bronze, extend to history and gold on every future build.
 
 - The load process should process only unprocessed rows
   (`WHERE etl_processed_at IS NULL`) from bronze each run. No `NOT EXISTS`
@@ -38,7 +38,7 @@ work (including the Vax GA4 pipeline); recorded here for reuse.
   few days changed.
 
 - History tables become pure append-only archives once the day-grain gold
-  approach is in place — stamped and written to for traceability, but never
+  approach is in place, stamped and written to for traceability, but never
   read again for computation.
 
 - Stamp bronze (`etl_processed_at`/`etl_run_id`) only as the last step, after
@@ -54,14 +54,14 @@ work (including the Vax GA4 pipeline); recorded here for reuse.
 
 - History (archive) tables should also carry `source_filename` (copied from
   the ingestion tool's own per-extract filename column, e.g. Adverity's
-  `dt_filename`) alongside `etl_run_id`/`etl_processed_at` — bronze's own
+  `dt_filename`) alongside `etl_run_id`/`etl_processed_at`, bronze's own
   filename column gets overwritten on the next truncate+reload of that
   partition, so only the history copy gives a permanent record of which
   source file produced each archived row.
 
 - A `RAISE USING MESSAGE` (or equivalent early-exit statement) used for a
   validation check (e.g. a preflight check) must have the concurrency lock
-  explicitly released immediately before it, in the same `IF` block —
+  explicitly released immediately before it, in the same `IF` block.
   `RAISE` outside a `BEGIN...EXCEPTION` block skips the rest of the procedure
   entirely, including any lock-release statement at the very end, leaving
   the lock stuck until its timeout and blocking every subsequent run.
